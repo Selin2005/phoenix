@@ -1,0 +1,59 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    name: Build and Release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24' # Use latest stable Go version
+
+      - name: Build Binaries (Linux AMD64)
+        env:
+          GOOS: linux
+          GOARCH: amd64
+          CGO_ENABLED: 0
+        run: |
+          mkdir -p dist
+          echo "Building Server..."
+          go build -ldflags="-s -w" -o dist/phoenix-server cmd/server/main.go
+          echo "Building Client..."
+          go build -ldflags="-s -w" -o dist/phoenix-client cmd/client/main.go
+
+      - name: Prepare Artifacts
+        run: |
+          cp example_server.toml dist/
+          cp example_client.toml dist/
+          cd dist
+          zip -r phoenix-linux-amd64.zip phoenix-server phoenix-client example_server.toml example_client.toml
+
+      - name: Determine Prerelease
+        id: check_prerelease
+        run: |
+          if [[ "${{ github.ref_name }}" == *"dev"* ]]; then
+            echo "is_prerelease=true" >> $GITHUB_OUTPUT
+            echo "Release type: Pre-release"
+          else
+            echo "is_prerelease=false" >> $GITHUB_OUTPUT
+            echo "Release type: Stable"
+          fi
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/phoenix-linux-amd64.zip
+          prerelease: ${{ steps.check_prerelease.outputs.is_prerelease }}
+          generate_release_notes: true
