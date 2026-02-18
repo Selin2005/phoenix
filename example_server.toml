@@ -1,0 +1,26 @@
+# Phoenix Server Configuration Example
+# This configuration file controls the behavior of the Phoenix server.
+
+# listen_addr: The TCP address and port the server will bind to.
+# This port accepts incoming connections from Phoenix clients over HTTP/2 Cleartext (h2c).
+# We use h2c because it supports multiplexing (multiple streams over one TCP connection)
+# and mimics standard HTTP/2 traffic patterns, making it effective for censorship circumvention
+# while avoiding the overhead of double-TLS if used behind a TLS terminator (like Nginx/Cloudflare).
+# Default: ":8080"
+listen_addr = ":8080"
+
+# [security]: This section defines which tunneling protocols are permitted.
+# By default, all protocols are disabled for security. You must explicitly enable them.
+[security]
+# enable_socks5: Allow clients to tunnel SOCKS5 traffic.
+# If set to simply `true`, any authenticated client can use SOCKS5.
+enable_socks5 = true
+
+# enable_shadowsocks: Allow clients to tunnel Shadowsocks traffic.
+# Requires additional configuration for keys if enabled.
+enable_shadowsocks = false
+
+# enable_ssh: Allow clients to tunnel SSH traffic.
+# This does NOT make the Phoenix server an SSH server. 
+# It only allows tunneling of SSH connections to other destinations.
+enable_ssh = false

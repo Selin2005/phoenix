@@ -1,0 +1,35 @@
+# Phoenix Client Configuration Example
+# This configuration file defines how the Phoenix client operates.
+# The client connects to the Phoenix server and opens multiple local listeners.
+
+# remote_addr: The address of the Phoenix server.
+# The client connects to the server using HTTP/2 Cleartext (h2c) for optimal performance and stealth.
+# h2c allows multiple inbound connections (SOCKS5, SSH, etc.) to share a single TCP connection.
+# Example: "example.com:8080"
+remote_addr = "127.0.0.1:8080"
+
+# [[inbounds]]: Defines a list of local listeners.
+# Each inbound listener opens a local port and tunnels traffic of a specific protocol.
+
+# Example 1: Local SOCKS5 Proxy
+[[inbounds]]
+# protocol: The type of traffic to handle.
+# Supported values: "socks5", "shadowsocks", "ssh"
+protocol = "socks5"
+# local_addr: The local address and port to bind on.
+local_addr = "127.0.0.1:1080"
+# auth: Optional. For Shadowsocks, this would be the password/method. For SSH, key path.
+# auth = ""
+
+# Example 2: Local SSH Tunnel Endpoint
+[[inbounds]]
+protocol = "ssh"
+local_addr = "127.0.0.1:2022"
+# auth: Not strictly required for simple forwarding, but can be used for client-side auth.
+auth = "/home/user/.ssh/id_rsa"
+
+# Example 3: Shadowsocks Proxy (Disabled)
+# [[inbounds]]
+# protocol = "shadowsocks"
+# local_addr = "127.0.0.1:8388"
+# auth = "aes-256-gcm:my-secret-password"
