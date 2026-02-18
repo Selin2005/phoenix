@@ -14,6 +14,12 @@ type ServerSecurity struct {
 
 	// EnableSSH enables or disables SSH tunneling.
 	EnableSSH bool `toml:"enable_ssh"`
+
+	// PrivateKeyPath is the path to the server's private key file (PEM).
+	PrivateKeyPath string `toml:"private_key"`
+
+	// AuthorizedClientKeys is a list of authorized client public keys (Base64).
+	AuthorizedClientKeys []string `toml:"authorized_clients"`
 }
 
 // DefaultServerSecurity returns the default security configuration (all disabled by default).

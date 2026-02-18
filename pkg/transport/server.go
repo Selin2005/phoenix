@@ -1,6 +1,12 @@
 package transport
 
 import (
+	"crypto/ed25519"
+	"crypto/tls"
+	"crypto/x509"
+	"encoding/base64"
+	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -8,6 +14,7 @@ import (
 	"phoenix/pkg/adapter/socks5"
 	"phoenix/pkg/adapter/ssh"
 	"phoenix/pkg/config"
+	"phoenix/pkg/crypto"
 	"phoenix/pkg/protocol"
 	"time"
 
@@ -136,24 +143,99 @@ func (s *H2Stream) Close() error {
 	return nil
 }
 
-// StartServer starts the H2C server.
+// StartServer starts the H2C/H2 Server.
 func StartServer(cfg *config.ServerConfig) error {
 	srv := NewServer(cfg)
-	h2s := &http2.Server{
-		MaxConcurrentStreams: 500,         // Increase concurrency
-		MaxReadFrameSize:     1024 * 1024, // 1MB frames if possible
-		IdleTimeout:          10 * time.Second,
-	}
-	handler := h2c.NewHandler(srv, h2s)
 
-	s := &http.Server{
-		Addr:         cfg.ListenAddr,
-		Handler:      handler,
-		ReadTimeout:  0, // Disable read timeout for streaming
-		WriteTimeout: 0, // Disable write timeout for streaming
-		IdleTimeout:  0, // Disable idle timeout
-	}
+	// Check if Private Key is configured for TLS
+	if cfg.Security.PrivateKeyPath != "" {
+		log.Println("Starting server in SECURE mode (mTLS)")
 
-	log.Printf("Listening on %s", cfg.ListenAddr)
-	return s.ListenAndServe()
+		// Load Private Key
+		priv, err := crypto.LoadPrivateKey(cfg.Security.PrivateKeyPath)
+		if err != nil {
+			return fmt.Errorf("failed to load private key: %v", err)
+		}
+
+		// Generate Self-Signed Certificate
+		cert, err := crypto.GenerateTLSCertificate(priv)
+		if err != nil {
+			return fmt.Errorf("failed to generate TLS certificate: %v", err)
+		}
+
+		// Determine Authorized Public Keys
+		authorizedKeys := make(map[string]bool)
+		for _, k := range cfg.Security.AuthorizedClientKeys {
+			authorizedKeys[k] = true
+		}
+
+		// Configure TLS
+		tlsConfig := &tls.Config{
+			Certificates: []tls.Certificate{cert},
+			ClientAuth:   tls.RequireAnyClientCert, // We require a cert to verify key
+			NextProtos:   []string{"h2"},
+			VerifyPeerCertificate: func(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error {
+				if len(rawCerts) == 0 {
+					return errors.New("no client certificate provided")
+				}
+				// Parse leaf certificate
+				leaf, err := x509.ParseCertificate(rawCerts[0])
+				if err != nil {
+					return fmt.Errorf("failed to parse client certificate: %v", err)
+				}
+
+				// Verify Public Key
+				pub := leaf.PublicKey
+				pubBytes, ok := pub.(ed25519.PublicKey)
+				if !ok {
+					// Also support other keys if needed, but we default to Ed25519
+					return errors.New("unsupported public key type (expected Ed25519)")
+				}
+
+				pubStr := base64.StdEncoding.EncodeToString(pubBytes)
+				if !authorizedKeys[pubStr] {
+					return fmt.Errorf("unauthorized client key: %s", pubStr)
+				}
+
+				return nil
+			},
+		}
+
+		ln, err := tls.Listen("tcp", cfg.ListenAddr, tlsConfig)
+		if err != nil {
+			return fmt.Errorf("failed to listen on %s: %v", cfg.ListenAddr, err)
+		}
+
+		// Standard HTTP server for TLS (Go handles H2 automatically)
+		s := &http.Server{
+			Handler:      srv, // Direct handler, no h2c
+			ReadTimeout:  0,
+			WriteTimeout: 0,
+			IdleTimeout:  0,
+		}
+
+		log.Printf("Listening on %s (TLS)", cfg.ListenAddr)
+		return s.Serve(ln)
+
+	} else {
+		log.Println("Starting server in INSECURE mode (h2c)")
+		// Fallback to H2C (Cleartext)
+		h2s := &http2.Server{
+			MaxConcurrentStreams: 500,         // Increase concurrency
+			MaxReadFrameSize:     1024 * 1024, // 1MB frames if possible
+			IdleTimeout:          10 * time.Second,
+		}
+		handler := h2c.NewHandler(srv, h2s)
+
+		s := &http.Server{
+			Addr:         cfg.ListenAddr,
+			Handler:      handler,
+			ReadTimeout:  0, // Disable read timeout for streaming
+			WriteTimeout: 0, // Disable write timeout for streaming
+			IdleTimeout:  0, // Disable idle timeout
+		}
+
+		log.Printf("Listening on %s", cfg.ListenAddr)
+		return s.ListenAndServe()
+	}
 }

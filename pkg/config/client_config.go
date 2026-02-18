@@ -36,6 +36,12 @@ type ClientConfig struct {
 
 	// ClientID is a unique identifier or token for authentication with the server (optional, for future use).
 	ClientID string `toml:"client_id,omitempty"`
+
+	// PrivateKeyPath is the path to the client's private key file (PEM).
+	PrivateKeyPath string `toml:"private_key"`
+
+	// ServerPublicKey is the detailed public key of the server (Base64).
+	ServerPublicKey string `toml:"server_public_key"`
 }
 
 // DefaultClientConfig returns a basic client configuration with a single SOCKS5 inbound.

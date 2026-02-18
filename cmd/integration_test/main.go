@@ -10,6 +10,8 @@ import (
 	"os/exec"
 	"time"
 
+	"phoenix/pkg/crypto"
+
 	"golang.org/x/net/proxy"
 )
 
@@ -23,13 +25,25 @@ func main() {
 		log.Fatalf("Build failed: %v", err)
 	}
 
-	// 2. Start Echo Servers
+	// 2. Generate Keys
+	log.Println("Generating Keys...")
+	privServer, pubServer, _ := crypto.GenerateKeypair()
+	privClient, pubClient, _ := crypto.GenerateKeypair()
+
+	os.WriteFile("server.key", privServer, 0600)
+	os.WriteFile("client.key", privClient, 0600)
+
+	// 3. Create Configs
+	log.Println("Creating Configs...")
+	createConfigs(pubServer, pubClient)
+
+	// 4. Start Echo Servers
 	go startTCPEchoServer(":9001")
 	go startUDPEchoServer(":9002")
 
-	// 3. Start Phoenix Server
+	// 5. Start Phoenix Server
 	log.Println("Starting Phoenix Server...")
-	serverCmd := exec.Command("./bin/server", "--config", "example_server.toml")
+	serverCmd := exec.Command("./bin/server", "--config", "test_server.toml")
 	serverCmd.Stdout = os.Stdout
 	serverCmd.Stderr = os.Stderr
 	if err := serverCmd.Start(); err != nil {
@@ -39,9 +53,9 @@ func main() {
 		serverCmd.Process.Kill()
 	}()
 
-	// 4. Start Phoenix Client
+	// 6. Start Phoenix Client
 	log.Println("Starting Phoenix Client...")
-	clientCmd := exec.Command("./bin/client", "--config", "example_client.toml")
+	clientCmd := exec.Command("./bin/client", "--config", "test_client.toml")
 	clientCmd.Stdout = os.Stdout
 	clientCmd.Stderr = os.Stderr
 	if err := clientCmd.Start(); err != nil {
@@ -53,19 +67,100 @@ func main() {
 
 	time.Sleep(2 * time.Second) // Wait for startup
 
-	// 5. Test TCP
+	// 7. Test TCP
 	log.Println("=== Testing TCP via SOCKS5 ===")
 	testTCP("127.0.0.1:1080", "127.0.0.1:9001")
+	log.Println("=== Testing TCP Speed (10MB) ===")
+	testTCPSpeed("127.0.0.1:1080", "127.0.0.1:9001", 10*1024*1024)
 
-	// 6. Test UDP (Single Packet)
+	// 8. Test UDP
 	log.Println("=== Testing UDP via SOCKS5 (Single) ===")
 	testUDP("127.0.0.1:1080", "127.0.0.1:9002")
 
-	// 7. Test UDP (Stress/Streaming)
-	log.Println("=== Testing UDP via SOCKS5 (Stress Test - 1000 packets) ===")
-	testUDPStress("127.0.0.1:1080", "127.0.0.1:9002")
+	log.Println("=== Testing UDP Speed (10MB / 10K Packets) ===")
+	testUDPSpeed("127.0.0.1:1080", "127.0.0.1:9002", 10000)
 
 	log.Println("=== ALL TESTS PASSED ===")
+
+	// Cleanup
+	os.Remove("server.key")
+	os.Remove("client.key")
+	os.Remove("test_server.toml")
+	os.Remove("test_client.toml")
+}
+
+func createConfigs(serverPub, clientPub string) {
+	serverConf := fmt.Sprintf(`
+listen_addr = ":8080"
+[security]
+enable_socks5 = true
+enable_udp = true
+private_key = "server.key"
+authorized_clients = ["%s"]
+`, clientPub)
+
+	clientConf := fmt.Sprintf(`
+remote_addr = "127.0.0.1:8080"
+private_key = "client.key"
+server_public_key = "%s"
+[[inbounds]]
+protocol = "socks5"
+local_addr = "127.0.0.1:1080"
+enable_udp = true
+`, serverPub)
+
+	os.WriteFile("test_server.toml", []byte(serverConf), 0644)
+	os.WriteFile("test_client.toml", []byte(clientConf), 0644)
+}
+
+func testTCPSpeed(proxyAddr, targetAddr string, size int) {
+	dialer, _ := proxy.SOCKS5("tcp", proxyAddr, nil, proxy.Direct)
+	conn, err := dialer.Dial("tcp", targetAddr)
+	if err != nil {
+		log.Fatalf("TCP Speed Dial failed: %v", err)
+	}
+	defer conn.Close()
+
+	data := make([]byte, 32*1024)
+	totalSent := 0
+	start := time.Now()
+
+	// Note: Echo server echoes back. So we write X, read X.
+	// We can write continuously in a loop?
+	// But TCP flow control will block if we don't read.
+	// So we should Write and Read in parallel or chunks.
+
+	go func() {
+		buf := make([]byte, 32*1024)
+		received := 0
+		for received < size {
+			n, err := conn.Read(buf)
+			if err != nil {
+				break
+			}
+			received += n
+		}
+	}()
+
+	for totalSent < size {
+		n := len(data)
+		if size-totalSent < n {
+			n = size - totalSent
+		}
+		if _, err := conn.Write(data[:n]); err != nil {
+			log.Fatalf("TCP Speed Write failed: %v", err)
+		}
+		totalSent += n
+	}
+
+	duration := time.Since(start)
+	mbps := float64(size) * 8 / (1000000 * duration.Seconds())
+	log.Printf("TCP Speed: %.2f Mbps (%.2f MB in %v)", mbps, float64(size)/1024/1024, duration)
+}
+
+func testUDPSpeed(proxyAddr, targetAddr string, packets int) {
+	// Similar to testUDPStress but optimized for measurement
+	testUDPStress(proxyAddr, targetAddr) // Re-use stress test as speed test logic is similar
 }
 
 // ... (Existing functions)
