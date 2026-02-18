@@ -31,32 +31,37 @@ func NewClient(cfg *config.ClientConfig) *Client {
 	var tr *http2.Transport
 	scheme := "http"
 
-	if cfg.PrivateKeyPath != "" {
-		// SECURE MODE (mTLS)
-		log.Println("Initializing Client in SECURE mode (mTLS)")
+	// Check if Secure Mode is requested (mTLS or One-Way TLS)
+	// Requires either PrivateKey (mTLS) OR ServerPublicKey (One-Way)
+	if cfg.PrivateKeyPath != "" || cfg.ServerPublicKey != "" {
+		log.Println("Initializing Client in SECURE mode (TLS)")
 		scheme = "https"
 
-		priv, err := crypto.LoadPrivateKey(cfg.PrivateKeyPath)
-		if err != nil {
-			log.Fatalf("Failed to load private key: %v", err)
-		}
-
-		cert, err := crypto.GenerateTLSCertificate(priv)
-		if err != nil {
-			log.Fatalf("Failed to generate TLS cert: %v", err)
+		var certs []tls.Certificate
+		if cfg.PrivateKeyPath != "" {
+			priv, err := crypto.LoadPrivateKey(cfg.PrivateKeyPath)
+			if err != nil {
+				log.Fatalf("Failed to load private key: %v", err)
+			}
+			cert, err := crypto.GenerateTLSCertificate(priv)
+			if err != nil {
+				log.Fatalf("Failed to generate TLS cert: %v", err)
+			}
+			certs = []tls.Certificate{cert}
+		} else {
+			log.Println("No private_key provided. Using One-Way TLS (Anonymous Client).")
 		}
 
 		tlsConfig := &tls.Config{
-			Certificates:       []tls.Certificate{cert},
+			Certificates:       certs,
 			InsecureSkipVerify: true, // We use custom verification
 			VerifyPeerCertificate: func(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error {
 				if cfg.ServerPublicKey == "" {
-					return nil // Pinning disabled? Or should we strict fail?
-					// For security, if key is missing, maybe warn?
-					// But user requirement says "Security multiplied".
-					// Let's enforce it if provided, or fail.
-					// If cfg.ServerPublicKey is empty, we are insecure against MitM!
-					// I'll log warning.
+					// Pinning disabled. Insecure against MITM.
+					// Allow it? For "easy setup"? User requested "security multiplied".
+					// But we will allow it with warning if user explicitly omits key.
+					log.Println("WARNING: server_public_key NOT SET. Connection vulnerable to MITM.")
+					return nil
 				}
 
 				if len(rawCerts) == 0 {

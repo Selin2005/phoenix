@@ -149,8 +149,6 @@ func StartServer(cfg *config.ServerConfig) error {
 
 	// Check if Private Key is configured for TLS
 	if cfg.Security.PrivateKeyPath != "" {
-		log.Println("Starting server in SECURE mode (mTLS)")
-
 		// Load Private Key
 		priv, err := crypto.LoadPrivateKey(cfg.Security.PrivateKeyPath)
 		if err != nil {
@@ -169,12 +167,13 @@ func StartServer(cfg *config.ServerConfig) error {
 			authorizedKeys[k] = true
 		}
 
-		// Configure TLS
-		tlsConfig := &tls.Config{
-			Certificates: []tls.Certificate{cert},
-			ClientAuth:   tls.RequireAnyClientCert, // We require a cert to verify key
-			NextProtos:   []string{"h2"},
-			VerifyPeerCertificate: func(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error {
+		var clientAuth tls.ClientAuthType
+		var verifyPeer func(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error
+
+		if len(authorizedKeys) > 0 {
+			log.Printf("Starting server in SECURE mode (mTLS) with %d authorized clients", len(authorizedKeys))
+			clientAuth = tls.RequireAnyClientCert
+			verifyPeer = func(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error {
 				if len(rawCerts) == 0 {
 					return errors.New("no client certificate provided")
 				}
@@ -198,7 +197,19 @@ func StartServer(cfg *config.ServerConfig) error {
 				}
 
 				return nil
-			},
+			}
+		} else {
+			log.Println("Starting server in ONE-WAY TLS mode (No Client Auth)")
+			clientAuth = tls.NoClientCert
+			verifyPeer = nil
+		}
+
+		// Configure TLS
+		tlsConfig := &tls.Config{
+			Certificates:          []tls.Certificate{cert},
+			ClientAuth:            clientAuth,
+			NextProtos:            []string{"h2"},
+			VerifyPeerCertificate: verifyPeer,
 		}
 
 		ln, err := tls.Listen("tcp", cfg.ListenAddr, tlsConfig)

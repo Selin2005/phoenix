@@ -6,10 +6,12 @@
 # Example: "example.com:8080" (h2c) or "example.com:8443" (mTLS)
 remote_addr = "127.0.0.1:8080"
 
-# --- Secure Authentication (mTLS) ---
-# To enable secure mode (RECOMMENDED), generate keys with `./server -gen-keys`.
-# You must provide your Private Key path and the Server's Public Key.
-# If these are set, the client automatically uses mutual TLS (h2).
+# --- Secure Authentication (mTLS / One-Way TLS) ---
+# To enable secure mode, generate keys with `./server -gen-keys`.
+# You MUST provide the Server's Public Key (`server_public_key`) to prevent MITM attacks.
+#
+# If you provide `private_key`, Mutual TLS (mTLS) is used (Client Auth).
+# If you OMIT `private_key` but provide `server_public_key`, One-Way TLS is used (Anonymous Client).
 #
 # private_key = "client.private.key"
 # server_public_key = "SERVER_PUBLIC_KEY..."

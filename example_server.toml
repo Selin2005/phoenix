@@ -26,7 +26,9 @@ enable_ssh = false
 # private_key = "server.private.key"
 
 # List of Authorized Client Public Keys (Base64).
-# Only clients with these keys can connect.
+# Only clients with these keys can connect (mTLS).
+# If this list is empty or commented out, the server operates in One-Way TLS mode.
+# In One-Way TLS, any client can connect securely (HTTPS-like), but no client authentication is performed.
 # authorized_clients = [
 #   "CLIENT_PUBLIC_KEY_1...",
 #   "CLIENT_PUBLIC_KEY_2..."
