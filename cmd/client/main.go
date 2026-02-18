@@ -1,7 +1,9 @@
 package main
 
 import (
+	"encoding/base64"
 	"flag"
+	"fmt"
 	"io"
 	"log"
 	"net"
@@ -32,11 +34,17 @@ func (d *PhoenixTunnelDialer) Dial(target string) (io.ReadWriteCloser, error) {
 
 func main() {
 	configPath := flag.String("config", "client.toml", "Path to client configuration file")
+	getSS := flag.Bool("get-ss", false, "Generate Shadowsocks config from client config")
 	flag.Parse()
 
 	cfg, err := config.LoadClientConfig(*configPath)
 	if err != nil {
 		log.Fatalf("Failed to load config: %v", err)
+	}
+
+	if *getSS {
+		generateShadowsocksConfig(cfg)
+		return
 	}
 
 	client := transport.NewClient(cfg)
@@ -62,6 +70,29 @@ func main() {
 	}()
 
 	wg.Wait()
+}
+
+func generateShadowsocksConfig(cfg *config.ClientConfig) {
+	found := false
+	for _, in := range cfg.Inbounds {
+		if in.Protocol == protocol.ProtocolShadowsocks {
+			found = true
+			if in.Auth == "" {
+				fmt.Println("Error: Shadowsocks inbound found but 'auth' (method:password) is empty.")
+				continue
+			}
+			// Encode UserInfo
+			userInfo := base64.URLEncoding.EncodeToString([]byte(in.Auth))
+			// Construct Link
+			// ss://userInfo@host:port#Phoenix
+			link := fmt.Sprintf("ss://%s@%s#Phoenix-Client", userInfo, in.LocalAddr)
+			fmt.Println("Shadowsocks Configuration:")
+			fmt.Println(link)
+		}
+	}
+	if !found {
+		fmt.Println("No Shadowsocks inbound found in configuration.")
+	}
 }
 
 func startInbound(client *transport.Client, in config.ClientInbound) {

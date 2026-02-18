@@ -30,8 +30,8 @@ local_addr = "127.0.0.1:2022"
 # auth: Not strictly required for simple forwarding, but can be used for client-side auth.
 auth = "/home/user/.ssh/id_rsa"
 
-# Example 3: Shadowsocks Proxy (Disabled)
-# [[inbounds]]
-# protocol = "shadowsocks"
-# local_addr = "127.0.0.1:8388"
-# auth = "aes-256-gcm:my-secret-password"
+# Example 3: Shadowsocks Proxy
+[[inbounds]]
+protocol = "shadowsocks"
+local_addr = "127.0.0.1:8388"
+auth = "chacha20-ietf-poly1305:my-secret-password"
