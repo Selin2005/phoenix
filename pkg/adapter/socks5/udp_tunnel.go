@@ -28,6 +28,7 @@ func HandleUDPTunnel(stream io.ReadWriteCloser) error {
 		for {
 			// Read Length
 			if _, err := io.ReadFull(stream, header); err != nil {
+				log.Printf("[SOCKS5-UDP-Server] Stream read error: %v", err)
 				errChan <- err
 				return
 			}
@@ -49,10 +50,6 @@ func HandleUDPTunnel(stream io.ReadWriteCloser) error {
 				log.Printf("[SOCKS5-UDP] Packet too short")
 				continue
 			}
-
-			// We don't strictly need to parse widely if we just want to send to the address in the packet.
-			// But net.ListenPacket.WriteTo requires net.Addr.
-			// We need to Convert SOCKS5 address format to net.Addr string.
 
 			// Offset 3 is ATYP
 			atyp := pktBuf[3]
@@ -118,6 +115,7 @@ func HandleUDPTunnel(stream io.ReadWriteCloser) error {
 		for {
 			n, peerAddr, err := udpConn.ReadFrom(buf)
 			if err != nil {
+				log.Printf("[SOCKS5-UDP-Server] ReadFrom UDP error: %v", err)
 				errChan <- err
 				return
 			}
@@ -151,30 +149,21 @@ func HandleUDPTunnel(stream io.ReadWriteCloser) error {
 			// Pkt = Header + Data
 			totalLen := len(header) + n
 
-			// Write Stream Length
-			lenBuf := make([]byte, 2)
-			binary.BigEndian.PutUint16(lenBuf, uint16(totalLen))
+			// Write Stream: [Len][Header][Data] in single write for atomicity
+			packet := make([]byte, 2+len(header)+n)
+			binary.BigEndian.PutUint16(packet, uint16(totalLen))
+			copy(packet[2:], header)
+			copy(packet[2+len(header):], buf[:n])
 
-			// We write length, then header, then data.
-			// Locking might be needed if concurrent writes proposed?
-			// Here we are the only writer to stream (logic: stream is full duplex,
-			// the other goroutine Reads from stream. This goroutine Writes to stream.
-			// io.ReadWriteCloser usually allows concurrent Read and Write.
-
-			if _, err := stream.Write(lenBuf); err != nil {
-				errChan <- err
-				return
-			}
-			if _, err := stream.Write(header); err != nil {
-				errChan <- err
-				return
-			}
-			if _, err := stream.Write(buf[:n]); err != nil {
+			if _, err := stream.Write(packet); err != nil {
+				log.Printf("[SOCKS5-UDP-Server] Failed to write to stream: %v", err)
 				errChan <- err
 				return
 			}
 		}
 	}()
 
-	return <-errChan
+	err = <-errChan
+	log.Printf("[SOCKS5-UDP-Server] Closing session due to: %v", err)
+	return err
 }

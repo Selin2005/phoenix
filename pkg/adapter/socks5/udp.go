@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"sync"
 )
 
 // HandleUDP establishes a UDP relay.
@@ -51,17 +52,9 @@ func HandleUDP(conn io.ReadWriteCloser, dialer Dialer) error {
 
 	// 3. Keep TCP Connection open and monitor UDP
 	// The TCP connection serves as a keep-alive signal.
-	// If it closes, we stop the UDP listener.
 
 	// Create a tunnel stream to Server for UDP traffic
 	// We initiate ONE stream for this association.
-	// The Dialer here (PhoenixTunnelDialer) opens a stream with "socks5-udp" protocol.
-	// We don't have a specific target yet (UDP packets have their own targets).
-	// So we dial with empty target?
-	// Or we use a special "udp-relay" target?
-	// Server side "socks5-udp" logic expects packets.
-
-	// stream, err := dialer.Dial("") // Empty target for UDP Tunnel
 	stream, err := dialer.Dial("udp-tunnel")
 	if err != nil {
 		return fmt.Errorf("failed to dial UDP tunnel: %v", err)
@@ -69,11 +62,11 @@ func HandleUDP(conn io.ReadWriteCloser, dialer Dialer) error {
 	defer stream.Close()
 
 	// 4. Relay Loop
-	// We need concurrent relay:
-	// A) UDP -> Stream
-	// B) Stream -> UDP
-
 	errChan := make(chan error, 2)
+
+	// Address Cache: To know where to send responses back to (Client UDP Addr)
+	var clientUDPAddr net.Addr
+	var mu sync.Mutex
 
 	// UDP -> Stream
 	go func() {
@@ -85,12 +78,15 @@ func HandleUDP(conn io.ReadWriteCloser, dialer Dialer) error {
 				return
 			}
 
-			// Validate peerAddr?
-			// RFC 1928 says we should only accept from the client causing the ASSOCIATION.
-			// But for simplicity, accept all.
+			// Store Client Address
+			mu.Lock()
+			if clientUDPAddr == nil || clientUDPAddr.String() != peerAddr.String() {
+				clientUDPAddr = peerAddr
+				log.Printf("[SOCKS5-UDP] Client Address set to: %s", peerAddr)
+			}
+			mu.Unlock()
 
-			// UDP Packet from Client has format: [RSV][FRAG][ATYP][DST.ADDR][DST.PORT][DATA]
-			// We verify fragmentation is not supported (FRAG=0).
+			// Validate packet
 			if n < 3 {
 				continue // Too short
 			}
@@ -102,24 +98,17 @@ func HandleUDP(conn io.ReadWriteCloser, dialer Dialer) error {
 
 			// Encapsulate into Stream: [Length (2 bytes)][Packet]
 			// Packet is buf[:n] (the SOCKS5 UDP request as is).
-			// We send it AS IS to Server.
-			// Server unwraps, extracts Dest, Sends.
 
 			// Write length
-			lenBuf := make([]byte, 2)
-			binary.BigEndian.PutUint16(lenBuf, uint16(n))
+			packet := make([]byte, 2+n)
+			binary.BigEndian.PutUint16(packet, uint16(n))
+			copy(packet[2:], buf[:n])
 
-			if _, err := stream.Write(lenBuf); err != nil {
+			if _, err := stream.Write(packet); err != nil {
+				log.Printf("[SOCKS5-UDP] Failed to write to stream: %v", err)
 				errChan <- err
 				return
 			}
-			if _, err := stream.Write(buf[:n]); err != nil {
-				errChan <- err
-				return
-			}
-
-			// Log peerAddr for debug?
-			_ = peerAddr
 		}
 	}()
 
@@ -140,49 +129,31 @@ func HandleUDP(conn io.ReadWriteCloser, dialer Dialer) error {
 
 			pktBuf := make([]byte, pktLen)
 			if _, err := io.ReadFull(stream, pktBuf); err != nil {
+				log.Printf("[SOCKS5-UDP] Failed to read packet body from stream: %v", err)
 				errChan <- err
 				return
 			}
 
 			// The packet is a SOCKS5 UDP header + Data.
-			// Format: [RSV][FRAG][ATYP][DST.ADDR][DST.PORT][DATA]
-			// IMPORTANT: DST.ADDR here is the SOURCE of the UDP packet (e.g. YouTube Server).
-			// The Client expects this so it knows who sent the data.
-			// We simply forward to Client via udpConn.Wait?
-			// We must send to the Client's UDP address.
-			// But we don't know Client's UDP address until it sends us a packet!
-			// `ReadFrom` tells us `peerAddr`.
-			// We should store `clientAddr` from the first ReadFrom?
-			//
-			// RFC 1928: "The server MUST relay the UDP datagram to the client... using the value of the port and IP address from the UDP REQUEST header sending it to the client."
-			// Wait, no. The server sends TO the client's address.
-			// But which address? The one that sent the ASSOCIATION request? Or the one sending UDP packets?
-			// Usually the one sending UDP packets.
-			// So we need to capture `peerAddr` from the `ReadFrom` loop and use it here.
-			//
-			// Solution: Use a `currentClientAddr` variable protected by mutex/atomic.
-			// Or pass it via channel?
-			// Since SOCKS5 UDP Associate is 1-to-1 usually, we can just latch on the first packet's source.
+			// Currently we trust Server to send correct packets.
 
-			// We'll trust that client sends a packet first.
-			// If stream sends data before client sends packet, we drop it?
-			// Actually, SOCKS5 UDP Associate flow: Client sends UDP packet first to establish mapping.
-			// So we can wait for `peerAddr` to be set.
+			// Send to Client
+			mu.Lock()
+			target := clientUDPAddr
+			mu.Unlock()
 
-			// But `udpConn.WriteTo` requires an address.
-			// I'll implement a simple address cache.
-			// But `net.PacketConn` `WriteTo` needs `net.Addr`.
-			// I can't access `peerAddr` from the other goroutine easily without synchronization.
-			// Simplest hack: The TCP connection stays open.
-			// Can we get Client IP from TCP conn?
-			// `HandleConnection` receives `io.ReadWriteCloser`. Not `net.Conn`.
-			// But `cmd/client/main.go` passes `net.Conn`.
-			// I should cast it.
+			if target != nil {
+				if _, err := udpConn.WriteTo(pktBuf, target); err != nil {
+					log.Printf("[SOCKS5-UDP] WriteTo error: %v", err)
+					// Don't error out on single packet failure
+				}
+			} else {
+				log.Printf("[SOCKS5-UDP] Dropped packet, client address unknown")
+			}
 		}
 	}()
 
-	// Wait for TCP close or Stream error
-	// Also wait for TCP input to detect closure.
+	// Wait for TCP close
 	go func() {
 		buf := make([]byte, 1)
 		conn.Read(buf) // Block until EOF
