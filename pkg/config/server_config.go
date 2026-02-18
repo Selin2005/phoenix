@@ -3,8 +3,11 @@ package config
 // ServerSecurity defines the security configuration for the server.
 // It controls which protocols are allowed to be tunneled.
 type ServerSecurity struct {
-	// EnableSOCKS5 enables or disables the SOCKS5 proxy protocol.
+	// EnableSOCKS5 enables or disables the SOCKS5 proxy protocol (TCP).
 	EnableSOCKS5 bool `toml:"enable_socks5"`
+
+	// EnableUDP enables or disables UDP tunneling (SOCKS5 UDP Associate).
+	EnableUDP bool `toml:"enable_udp"`
 
 	// EnableShadowsocks enables or disables the Shadowsocks proxy protocol.
 	EnableShadowsocks bool `toml:"enable_shadowsocks"`

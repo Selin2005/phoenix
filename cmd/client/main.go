@@ -22,7 +22,12 @@ type PhoenixTunnelDialer struct {
 }
 
 func (d *PhoenixTunnelDialer) Dial(target string) (io.ReadWriteCloser, error) {
-	return d.Client.Dial(d.Proto, target)
+	proto := d.Proto
+	if target == "udp-tunnel" {
+		proto = protocol.ProtocolSOCKS5UDP
+		target = ""
+	}
+	return d.Client.Dial(proto, target)
 }
 
 func main() {
@@ -93,7 +98,7 @@ func handleConnection(client *transport.Client, in config.ClientInbound, conn ne
 			Proto:  protocol.ProtocolSOCKS5,
 		}
 		// Wrap conn to io.ReadWriteCloser to satisfy interface
-		if err := socks5.HandleConnection(conn, dialer); err != nil {
+		if err := socks5.HandleConnection(conn, dialer, in.EnableUDP); err != nil {
 			log.Printf("SOCKS5 Handler Error: %v", err)
 		}
 

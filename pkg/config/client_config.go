@@ -12,6 +12,9 @@ type ClientInbound struct {
 	// LocalAddr is the address and port the client should listen on (e.g., "127.0.0.1:1080").
 	LocalAddr string `toml:"local_addr"`
 
+	// EnableUDP allows UDP Associate for SOCKS5
+	EnableUDP bool `toml:"enable_udp,omitempty"`
+
 	// TargetAddr is the remote destination address (optional, mainly for SSH/Port Forwarding).
 	TargetAddr string `toml:"target_addr,omitempty"`
 

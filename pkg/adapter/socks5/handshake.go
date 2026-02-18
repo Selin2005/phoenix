@@ -20,9 +20,10 @@ func (d *NetDialer) Dial(target string) (io.ReadWriteCloser, error) {
 }
 
 // HandleConnection performs the SOCKS5 handshake.
-// conn: The client connection (e.g., from browser).
-// dialer: The strategy to connect to the target (e.g., direct or via tunnel).
-func HandleConnection(conn io.ReadWriteCloser, dialer Dialer) error {
+// conn: The client connection.
+// dialer: The strategy to connect to the target.
+// enableUDP: Whether to allow UDP ASSOCIATE.
+func HandleConnection(conn io.ReadWriteCloser, dialer Dialer, enableUDP bool) error {
 	defer conn.Close()
 
 	// 1. Negotiation Phase
@@ -51,7 +52,18 @@ func HandleConnection(conn io.ReadWriteCloser, dialer Dialer) error {
 	}
 
 	cmd := reqHeader[1]
-	if cmd != 0x01 { // CONNECT
+	if cmd == 0x03 { // UDP ASSOCIATE
+		if !enableUDP {
+			// UDP Disabled
+			conn.Write([]byte{0x05, 0x07, 0x00, 0x01, 0, 0, 0, 0, 0, 0}) // Command not supported / prohibited
+			return fmt.Errorf("udp associate disabled")
+		}
+		// Delegate to UDP Handler
+		// Note: We need to consume the rest of the request packet first!
+		// The request contains DST.ADDR and DST.PORT (which are ignored for UDP ASSOCIATE usually, but we must read them).
+		// We already read [VER, CMD, RSV, ATYP].
+		// Now read address.
+	} else if cmd != 0x01 { // CONNECT
 		return fmt.Errorf("unsupported command: %d", cmd)
 	}
 
@@ -92,6 +104,12 @@ func HandleConnection(conn io.ReadWriteCloser, dialer Dialer) error {
 		return err
 	}
 	port := binary.BigEndian.Uint16(portBuf)
+
+	// If UDP ASSOCIATE, handle it now
+	if cmd == 0x03 {
+		return HandleUDP(conn, dialer)
+	}
+
 	target := fmt.Sprintf("%s:%d", targetAddr, port)
 
 	// 3. Connect via Dialer

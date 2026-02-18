@@ -4,8 +4,10 @@ package protocol
 type ProtocolType string
 
 const (
-	// ProtocolSOCKS5 represents the SOCKS5 proxy protocol.
+	// ProtocolSOCKS5 represents the SOCKS5 proxy protocol (TCP).
 	ProtocolSOCKS5 ProtocolType = "socks5"
+	// ProtocolSOCKS5UDP represents the SOCKS5 proxy protocol (UDP Tunnel).
+	ProtocolSOCKS5UDP ProtocolType = "socks5-udp"
 	// ProtocolShadowsocks represents the Shadowsocks proxy protocol.
 	ProtocolShadowsocks ProtocolType = "shadowsocks"
 	// ProtocolSSH represents SSH tunneling.

@@ -43,6 +43,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch protocol.ProtocolType(proto) {
 	case protocol.ProtocolSOCKS5:
 		allowed = s.Config.Security.EnableSOCKS5
+	case protocol.ProtocolSOCKS5UDP:
+		allowed = s.Config.Security.EnableUDP
 	case protocol.ProtocolShadowsocks:
 		allowed = s.Config.Security.EnableShadowsocks
 	case protocol.ProtocolSSH:
@@ -83,7 +85,14 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		switch protocol.ProtocolType(proto) {
 		case protocol.ProtocolSOCKS5:
 			// Server handles SOCKS5 handshake
-			err = socks5.HandleConnection(stream, &socks5.NetDialer{})
+			err = socks5.HandleConnection(stream, &socks5.NetDialer{}, s.Config.Security.EnableUDP)
+		case protocol.ProtocolSOCKS5UDP:
+			// Server handles SOCKS5 UDP Tunnel
+			if !s.Config.Security.EnableUDP {
+				http.Error(w, "UDP Disabled", http.StatusForbidden)
+				return
+			}
+			err = socks5.HandleUDPTunnel(stream)
 		case protocol.ProtocolShadowsocks:
 			err = shadowsocks.HandleConnection(stream)
 		case protocol.ProtocolSSH:

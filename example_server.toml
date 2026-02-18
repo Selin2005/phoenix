@@ -16,6 +16,9 @@ listen_addr = ":8080"
 # If set to simply `true`, any authenticated client can use SOCKS5.
 enable_socks5 = true
 
+# enable_udp: Allow SOCKS5 UDP Associate (for UDP tunneling).
+enable_udp = true
+
 # enable_shadowsocks: Allow clients to tunnel Shadowsocks traffic.
 # Requires additional configuration for keys if enabled.
 enable_shadowsocks = false
