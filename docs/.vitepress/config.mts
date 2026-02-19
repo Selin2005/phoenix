@@ -13,7 +13,26 @@ export default defineConfig({
     ['link', { href: 'https://fonts.googleapis.com/css2?family=Vazirmatn:wght@100..900&display=swap', rel: 'stylesheet' }],
     ['style', {}, `
       :root { --vp-font-family-base: "Inter", sans-serif; }
-      html[lang="fa-IR"] { --vp-font-family-base: "Vazirmatn", sans-serif; }
+      html[lang="fa-IR"] { 
+        --vp-font-family-base: "Vazirmatn", sans-serif; 
+        direction: rtl;
+        text-align: right;
+      }
+      /* RTL Support for Hero Section */
+      html[lang="fa-IR"] .VPImage { margin-left: 0; margin-right: auto; }
+      html[lang="fa-IR"] .VPHero .text { text-align: right; }
+      html[lang="fa-IR"] .VPHero .tagline { text-align: right; }
+      html[lang="fa-IR"] .VPHero .name { text-align: right; }
+      
+      /* RTL Support for Features */
+      html[lang="fa-IR"] .VPFeature { text-align: right; }
+      
+      /* RTL Support for Sidebar */
+      html[lang="fa-IR"] .VPSidebar { text-align: right; border-right: none; border-left: 1px solid var(--vp-c-divider); }
+      html[lang="fa-IR"] .VPSidebarItem .text { padding-top: 4px; padding-bottom: 4px; }
+      
+      /* RTL Support for Navbar */
+      html[lang="fa-IR"] .VPNavBarTitle { margin-right: 0; margin-left: 12px; }
     `]
   ],
 
