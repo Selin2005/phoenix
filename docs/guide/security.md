@@ -1,93 +1,76 @@
 # Security & Encryption Modes
 
-Phoenix offers flexible security modes to adapt to different network environments and threat models. It supports operation without additional encryption, with one-way TLS (like HTTPS), and with Mutual TLS (mTLS) for client authentication.
+Phoenix distinguishes itself by offering a spectrum of security modes, from raw performance to military-grade mutual authentication, all running over HTTP/2 Cleartext (h2c) to withstand DPI.
 
-## 1. No Encryption (Cleartext h2c)
-In this mode, traffic is encapsulated in HTTP/2 frames but transmitted over plain TCP. This is useful when running behind a CDN that handles the SSL/TLS termination, or for local testing.
+## 1. Cleartext h2c (No Encryption)
+**Best for:** Setup behind a Trusted CDN (Cloudflare/Gcore) that handles TLS.
 
-> **Note:** While "Cleartext", the traffic is still multiplexed and binary-encoded HTTP/2, making it difficult for simple DPI to inspect.
+In this mode, traffic is encapsulated in HTTP/2 frames but sent over plain TCP. The "Security" comes from the fact that it looks like standard HTTP/2 traffic to a web server.
 
-### Server Configuration
+### Configuration
+*   **Server:** Do NOT set `private_key`.
+*   **Client:** Do NOT set `server_public_key` or `private_key`.
+
+---
+
+## 2. One-Way TLS (Anonymous Client)
+**Best for:** Standard private proxy usage. Prevents MITM (Man-in-the-Middle) attacks.
+
+Similar to standard HTTPS. The Client encrypts traffic using the Server's Public Key. The Server is authenticated, but the Client is anonymous.
+
+### Setup
+1.  **Server:** Generate keys: `./phoenix-server -gen-keys`. Save the private key (e.g., `server.key`).
+2.  **Server Config:** point `private_key` to the generated file.
+3.  **Client Config:** Copy the printed **Public Key** from the server generation step and paste it into `server_public_key`.
+
+**(No Client Private Key is required in this mode.)**
+
+### Config Snippets
+
+**Server (`server.toml`):**
 ```toml
-# No special security settings needed, just bind to a port.
-listen_addr = ":8080"
+[security]
+private_key = "server.key"
+# authorized_clients is empty/commented
 ```
 
-### Client Configuration
+**Client (`client.toml`):**
 ```toml
-remote_addr = "server-ip:8080"
+remote_addr = "x.x.x.x:8080"
+server_public_key = "INSERT_SERVER_PUBLIC_KEY_HERE"
+# private_key is commented out
 ```
 
 ---
 
-## 2. One-Way TLS (Standard HTTPS)
-This mode mimics standard web traffic. The server has a TLS certificate (like a website), and the client verifies the server's identity. This encrypts the tunnel and hides the traffic content.
+## 3. Mutual TLS (mTLS - High Security)
+**Best for:** High-censorship environments. Prevents active probing.
 
-### Prerequisites
-- A valid TLS certificate (`server.crt`) and private key (`server.key`). You can generate self-signed ones or use Let's Encrypt.
+In mTLS, **both** the client and server must prove their identity. If a censor tries to connect to your server (Active Probing) without a valid Client Key, the connection is instantly rejected.
 
-### Server Configuration
+### Setup
+1.  **Server:** Generate keys (`./phoenix-server -gen-keys`) -> Get `Server PubKey`.
+2.  **Client:** Generate keys (`./phoenix-client -gen-keys`) -> Get `Client PubKey`.
+3.  **Exchange:**
+    *   Put `Server PubKey` into **Client's** `server_public_key`.
+    *   Put `Client PubKey` into **Server's** `authorized_clients` list.
+
+### Config Snippets
+
+**Server (`server.toml`):**
 ```toml
-listen_addr = ":8443"
-
 [security]
-# Path to your server's TLS certificate and private key
-cert_file = "server.crt"
-key_file = "server.key"
+private_key = "server.key"
+authorized_clients = [
+    "CLIENT_PUBLIC_KEY_BASE64_HERE"
+]
 ```
 
-### Client Configuration
+**Client (`client.toml`):**
 ```toml
-# Use the domain name if you have a valid cert, or IP.
-# If using a self-signed cert, you might need to trust the CA on the client.
-remote_addr = "example.com:8443"
+remote_addr = "x.x.x.x:8080"
+private_key = "client.key"
+server_public_key = "SERVER_PUBLIC_KEY_BASE64_HERE"
 ```
 
----
-
-## 3. Mutual TLS (mTLS - Advanced Security)
-mTLS adds a layer of authentication where the **client must also present a valid certificate**. This prevents unauthorized users from even connecting to your server (active probing protection). The server will reject any handshake that doesn't provide a trusted client certificate.
-
-### Prerequisites
-- Server Certificate & Key (`server.crt`, `server.key`)
-- Client Certificate & Key (`client.crt`, `client.key`)
-- CA Certificate (to verify both)
-
-### Step 1: Generate Keys
-You can use the built-in helper (if available) or `openssl`:
-
-```bash
-# 1. Generate CA
-openssl req -x509 -newkey rsa:4096 -nodes -keyout ca.key -out ca.crt -days 3650
-
-# 2. Generate Server Cert
-openssl req -new -keyout server.key -out server.csr -nodes
-openssl x509 -req -in server.csr -CA ca.crt -CAkey ca.key -set_serial 01 -out server.crt
-
-# 3. Generate Client Cert
-openssl req -new -keyout client.key -out client.csr -nodes
-openssl x509 -req -in client.csr -CA ca.crt -CAkey ca.key -set_serial 02 -out client.crt
-```
-
-### Server Configuration
-```toml
-listen_addr = ":8443"
-
-[security]
-cert_file = "server.crt"
-key_file = "server.key"
-
-# Enforce mTLS by specifying the CA that signed the client certs
-client_ca_file = "ca.crt"
-```
-
-### Client Configuration
-```toml
-remote_addr = "example.com:8443"
-
-# Client must provide its own certificate
-cert_file = "client.crt"
-key_file = "client.key"
-# Trust the CA that signed the server's cert
-ca_file = "ca.crt"
-```
+> **Note:** Keys are Ed25519, providing high security with small key sizes and fast performance.
