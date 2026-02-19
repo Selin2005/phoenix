@@ -28,15 +28,15 @@
 
 ```mermaid
 graph LR
-    subgraph Client Side
-        A[User Apps<br/>(Telegram/Browser)] -->|SOCKS5/HTTP| B[Phoenix Client]
+    subgraph Client_Side [Client Side]
+        A["User Apps<br/>(Telegram/Browser)"] -->|SOCKS5/HTTP| B["Phoenix Client"]
     end
     
-    B -->|h2c Multiplexed Tunnel| C{Internet / CDN / Firewall}
-    C -->|h2c Multiplexed Tunnel| D[Phoenix Server]
+    B -->|"h2c Multiplexed Tunnel"| C{"Internet / CDN / Firewall"}
+    C -->|"h2c Multiplexed Tunnel"| D["Phoenix Server"]
     
-    subgraph Server Side
-        D -->|TCP/UDP| E[Target Destination<br/>(YouTube/Twitter/etc.)]
+    subgraph Server_Side [Server Side]
+        D -->|TCP/UDP| E["Target Destination<br/>(YouTube/Twitter/etc.)"]
     end
     
     style B fill:#f9f,stroke:#333,stroke-width:2px
