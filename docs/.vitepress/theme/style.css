@@ -1,0 +1,26 @@
+/**
+ * Customizing CSS Variables for Phoenix Theme
+ * Override default colors with Phoenix Orange/Red palette
+ */
+
+:root {
+  --vp-c-brand-1: #FF6B00; /* Vibrant Orange */
+  --vp-c-brand-2: #E74C3C; /* Red */
+  --vp-c-brand-3: #C0392B; /* Deep Red */
+  --vp-home-hero-name-color: transparent;
+  --vp-home-hero-name-background: -webkit-linear-gradient(120deg, #bd34fe 30%, #41d1ff);
+  
+  /* Additional Styling for Glassmorphism could go here */
+}
+
+/* Make the brand gradient text for "Phoenix" */
+.VPHero .name {
+  background: -webkit-linear-gradient(315deg, #FF6B00 25%, #E74C3C) !important;
+  -webkit-background-clip: text !important;
+  -webkit-text-fill-color: transparent !important;
+}
+
+/* Optional: Dark mode improvements */
+.dark {
+  --vp-c-bg: #1a1a1a;
+}
