@@ -2,15 +2,16 @@ import { defineConfig } from 'vitepress'
 
 // https://vitepress.dev/reference/site-config
 export default defineConfig({
+  base: '/phoenix/',
   title: "Phoenix (ققنوس)",
   description: "High-performance, DPI-resistant censorship circumvention tool.",
   head: [
-    ['link', { rel: 'icon', href: '/logo.svg' }]
+    ['link', { rel: 'icon', href: '/phoenix/logo.svg' }]
   ],
   themeConfig: {
     // https://vitepress.dev/reference/default-theme-config
     logo: '/logo.svg',
-    
+
     nav: [
       { text: 'Home', link: '/' },
       { text: 'Guide', link: '/guide/getting-started' },
