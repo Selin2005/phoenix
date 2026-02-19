@@ -16,7 +16,7 @@ hero:
       link: /fa/guide/getting-started
     - theme: alt
       text: مشاهده در گیت‌هاب
-      link: https://github.com/Selin2005/phoenix
+      link: https://github.com/Fox-Fig/phoenix
 
 features:
   - title: مقاوم در برابر DPI

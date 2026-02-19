@@ -4,12 +4,12 @@
   <p>
     <img src="https://img.shields.io/badge/License-GPLv2-blue.svg" alt="License">
     <img src="https://img.shields.io/badge/Go-1.24+-00ADD8?logo=go" alt="Go Version">
-    <img src="https://github.com/Selin2005/phoenix/actions/workflows/deploy.yml/badge.svg" alt="Build Status">
-    <img src="https://img.shields.io/github/v/release/Selin2005/phoenix?include_prereleases" alt="Latest Release">
+    <img src="https://github.com/Fox-Fig/phoenix/actions/workflows/deploy.yml/badge.svg" alt="Build Status">
+    <img src="https://img.shields.io/github/v/release/Fox-Fig/phoenix?include_prereleases" alt="Latest Release">
   </p>
   <p><strong>ققنوس (Phoenix)</strong> ابزاری قدرتمند برای عبور از فیلترینگ و مقاوم در برابر تکنیک‌های پیشرفته DPI با استفاده از مالتی‌پلکسینگ <strong>HTTP/2 (h2/h2c)</strong> است.</p>
 
-  [🇬🇧 Read in English 🇬🇧](README.md) | [📚 **مستندات کامل (فارسی)**](https://selin2005.github.io/phoenix/fa/)
+  [🇬🇧 Read in English 🇬🇧](README.md) | [📚 **مستندات کامل (فارسی)**](https://Fox-Fig.github.io/phoenix/fa/)
 </div>
 
 ---
@@ -20,11 +20,11 @@
 
 ققنوس با ایجاد یک تونل پایدار و رمزنگاری شده (اختیاری) بین کاربر و سرور، امکان دور زدن محدودیت‌های شبکه را فراهم می‌کند. این ابزار از قابلیت‌های پیشرفته‌ای مثل **احراز هویت دوطرفه (mTLS)**، **One-Way TLS** و **بازیابی خودکار اتصال (Zombie Connection Recovery)** بهره می‌برد تا در شبکه‌های آلوده و فیلتر شده، اتصال پایداری را حفظ کند.
 
-برای مطالعه دقیق معماری، تنظیمات، و تحلیل امنیتی، لطفاً به **[مستندات کامل](https://selin2005.github.io/phoenix/)** مراجعه کنید.
+برای مطالعه دقیق معماری، تنظیمات، و تحلیل امنیتی، لطفاً به **[مستندات کامل](https://Fox-Fig.github.io/phoenix/)** مراجعه کنید.
 
 ## ⚡ شروع سریع
 
-1.  **دانلود:** آخرین نسخه متناسب با سیستم عامل خود را از [صفحه Releases](https://github.com/Selin2005/phoenix/releases) دانلود کنید.
+1.  **دانلود:** آخرین نسخه متناسب با سیستم عامل خود را از [صفحه Releases](https://github.com/Fox-Fig/phoenix/releases) دانلود کنید.
 2.  **سرور:** روی VPS خود اجرا کنید:
     ```bash
     ./phoenix-server -c server.toml
@@ -34,7 +34,7 @@
     ./phoenix-client -c client.toml
     ```
 
-> **نکته:** راهنمای گام‌به‌گام نصب و راه‌اندازی در لینوکس، ویندوز، مک و اندروید در [راهنمای شروع به کار](https://selin2005.github.io/phoenix/guide/getting-started) موجود است.
+> **نکته:** راهنمای گام‌به‌گام نصب و راه‌اندازی در لینوکس، ویندوز، مک و اندروید در [راهنمای شروع به کار](https://Fox-Fig.github.io/phoenix/guide/getting-started) موجود است.
 
 ## ❤️ حمایت و دونیت
 

@@ -4,12 +4,12 @@
   <p>
     <img src="https://img.shields.io/badge/License-GPLv2-blue.svg" alt="License">
     <img src="https://img.shields.io/badge/Go-1.24+-00ADD8?logo=go" alt="Go Version">
-    <img src="https://github.com/Selin2005/phoenix/actions/workflows/deploy.yml/badge.svg" alt="Build Status">
-    <a href="https://selin2005.github.io/phoenix/"><img src="https://img.shields.io/github/v/release/Selin2005/phoenix?include_prereleases" alt="Latest Release"></a>
+    <img src="https://github.com/Fox-Fig/phoenix/actions/workflows/deploy.yml/badge.svg" alt="Build Status">
+    <a href="https://Fox-Fig.github.io/phoenix/"><img src="https://img.shields.io/github/v/release/Fox-Fig/phoenix?include_prereleases" alt="Latest Release"></a>
   </p>
   <p><strong>Phoenix</strong> is a high-performance, resilient tunneling tool designed to bypass DPI and severe network censorship using <strong>HTTP/2 (h2/h2c)</strong> multiplexing.</p>
 
-  [🇮🇷 Read in Persian (فارسی) 🇮🇷](README-fa.md) | [📚 **Full Documentation**](https://selin2005.github.io/phoenix/)
+  [🇮🇷 Read in Persian (فارسی) 🇮🇷](README-fa.md) | [📚 **Full Documentation**](https://Fox-Fig.github.io/phoenix/)
 </div>
 
 ---
@@ -18,11 +18,11 @@
 
 Phoenix establishes a persistent, multiplexed HTTP/2 tunnel between a client and server. It offers advanced features like **mTLS authentication**, **One-Way TLS** (HTTPS-like), and automatic **Zombie Connection Recovery** to maintain connectivity in hostile network environments.
 
-For detailed architecture, configuration, and security analysis, please visit our **[Official Documentation](https://selin2005.github.io/phoenix/)**.
+For detailed architecture, configuration, and security analysis, please visit our **[Official Documentation](https://Fox-Fig.github.io/phoenix/)**.
 
 ## ⚡ Quick Start
 
-1.  **Download:** Get the latest binary for your OS from the [Releases Page](https://github.com/Selin2005/phoenix/releases).
+1.  **Download:** Get the latest binary for your OS from the [Releases Page](https://github.com/Fox-Fig/phoenix/releases).
 2.  **Server:** Run on your VPS with a config file.
     ```bash
     ./phoenix-server -c server.toml
@@ -32,7 +32,7 @@ For detailed architecture, configuration, and security analysis, please visit ou
     ./phoenix-client -c client.toml
     ```
 
-> **Note:** Comprehensive setup guides for Linux, Windows, macOS, and Android are available in the [Getting Started Guide](https://selin2005.github.io/phoenix/guide/getting-started).
+> **Note:** Comprehensive setup guides for Linux, Windows, macOS, and Android are available in the [Getting Started Guide](https://Fox-Fig.github.io/phoenix/guide/getting-started).
 
 ## ❤️ Support & Donate
 

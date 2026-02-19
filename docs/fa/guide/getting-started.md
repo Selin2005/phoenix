@@ -19,7 +19,7 @@ mkdir -p /opt/phoenix
 cd /opt/phoenix
 
 # دانلود فایل اجرایی (مثال برای Linux AMD64)
-wget https://github.com/Selin2005/phoenix/releases/latest/download/phoenix-server-linux-amd64.zip
+wget https://github.com/Fox-Fig/phoenix/releases/latest/download/phoenix-server-linux-amd64.zip
 unzip phoenix-server-linux-amd64.zip
 chmod +x phoenix-server-linux-amd64
 mv phoenix-server-linux-amd64 phoenix-server

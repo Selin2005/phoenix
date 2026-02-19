@@ -14,7 +14,7 @@ hero:
       link: /guide/getting-started
     - theme: alt
       text: View on GitHub
-      link: https://github.com/Selin2005/phoenix
+      link: https://github.com/Fox-Fig/phoenix
 
 features:
   - title: DPI Resistant
