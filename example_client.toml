@@ -52,3 +52,7 @@ hard_reset_threshold = 3
 # Minimum time in seconds between hard resets (debounce duration) to prevent rapid loops.
 # Default: 5
 hard_reset_debounce = 5
+
+# PoolSize specifies the number of independent HTTP clients (TCP connections) to multiplex over.
+# Default: 5
+pool_size = 5
