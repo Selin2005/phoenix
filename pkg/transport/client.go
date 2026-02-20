@@ -192,9 +192,9 @@ func (c *Client) Dial(proto protocol.ProtocolType, target string) (io.ReadWriteC
 // handleConnectionFailure increments failure count and triggers Hard Reset if needed.
 func (c *Client) handleConnectionFailure(err error) {
 	newCount := atomic.AddUint32(&c.failureCount, 1)
-	log.Printf("Connection Error (%d/3): %v", newCount, err)
+	log.Printf("Connection Error (%d/%d): %v", newCount, c.Config.HardResetThreshold, err)
 
-	if newCount >= 3 {
+	if newCount >= c.Config.HardResetThreshold {
 		c.resetClient()
 	}
 }
@@ -204,8 +204,9 @@ func (c *Client) resetClient() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	// Debounce: Check if we reset recently (e.g. within 5 seconds)
-	if time.Since(c.lastReset) < 5*time.Second {
+	// Debounce: Check if we reset recently
+	debounceDuration := time.Duration(c.Config.HardResetDebounce) * time.Second
+	if time.Since(c.lastReset) < debounceDuration {
 		// Reset already happened recently. Just ensure failure count is low and return.
 		atomic.StoreUint32(&c.failureCount, 0)
 		return

@@ -42,6 +42,12 @@ type ClientConfig struct {
 
 	// ServerPublicKey is the detailed public key of the server (Base64).
 	ServerPublicKey string `toml:"server_public_key"`
+
+	// HardResetThreshold is the number of connection failures before a hard reset
+	HardResetThreshold uint32 `toml:"hard_reset_threshold"`
+
+	// HardResetDebounce is the minimum seconds between hard resets
+	HardResetDebounce int `toml:"hard_reset_debounce"`
 }
 
 // DefaultClientConfig returns a basic client configuration with a single SOCKS5 inbound.
@@ -54,5 +60,7 @@ func DefaultClientConfig() *ClientConfig {
 				LocalAddr: "127.0.0.1:1080",
 			},
 		},
+		HardResetThreshold: 3,
+		HardResetDebounce:  5,
 	}
 }
