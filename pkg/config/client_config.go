@@ -48,6 +48,9 @@ type ClientConfig struct {
 
 	// HardResetDebounce is the minimum seconds between hard resets
 	HardResetDebounce int `toml:"hard_reset_debounce"`
+
+	// PoolSize specifies the number of independent HTTP clients (TCP connections) to multiplex over.
+	PoolSize int `toml:"pool_size"`
 }
 
 // DefaultClientConfig returns a basic client configuration with a single SOCKS5 inbound.
@@ -62,5 +65,6 @@ func DefaultClientConfig() *ClientConfig {
 		},
 		HardResetThreshold: 3,
 		HardResetDebounce:  5,
+		PoolSize:           5,
 	}
 }
