@@ -21,14 +21,20 @@ import (
 	"golang.org/x/net/http2"
 )
 
-// Client handles outgoing connections to the Server.
+// PooledClient represents a single HTTP client and its error state.
+type PooledClient struct {
+	client       *http.Client
+	failureCount uint32
+	lastReset    time.Time
+	mu           sync.RWMutex
+}
+
+// Client handles outgoing connections to the Server multiplexed over a Connection Pool.
 type Client struct {
-	Config       *config.ClientConfig
-	httpClient   *http.Client // Internal HTTP client (protected by mu)
-	Scheme       string
-	failureCount uint32       // Atomic counter
-	mu           sync.RWMutex // Protects httpClient
-	lastReset    time.Time    // Timestamp of last reset (for debounce)
+	Config    *config.ClientConfig
+	Scheme    string
+	pool      []*PooledClient
+	poolIndex atomic.Uint64
 }
 
 // NewClient creates a new Phoenix client instance.
@@ -44,8 +50,18 @@ func NewClient(cfg *config.ClientConfig) *Client {
 		c.Scheme = "http"
 	}
 
-	// Initialize the first HTTP client
-	c.httpClient = c.createHTTPClient()
+	// Initialize pool
+	size := cfg.PoolSize
+	if size <= 0 {
+		size = 5
+	}
+	c.pool = make([]*PooledClient, size)
+	for i := 0; i < size; i++ {
+		c.pool[i] = &PooledClient{
+			client: c.createHTTPClient(),
+		}
+	}
+
 	return c
 }
 
@@ -128,13 +144,21 @@ func (c *Client) createHTTPClient() *http.Client {
 	return &http.Client{Transport: tr}
 }
 
+// GetClient returns a PooledClient using Round-Robin.
+func (c *Client) GetClient() (*PooledClient, int) {
+	idx := c.poolIndex.Add(1) % uint64(len(c.pool))
+	return c.pool[idx], int(idx)
+}
+
 // Dial initiates a tunnel for a specific protocol.
 // It connects to the server and returns the stream to be used by the local listener.
 func (c *Client) Dial(proto protocol.ProtocolType, target string) (io.ReadWriteCloser, error) {
-	// Get current HTTP client (Read Lock)
-	c.mu.RLock()
-	client := c.httpClient
-	c.mu.RUnlock()
+	// Select connection from pool via Round-Robin
+	pc, poolIdx := c.GetClient()
+
+	pc.mu.RLock()
+	httpClient := pc.client
+	pc.mu.RUnlock()
 
 	// We use io.Pipe to bridge the local connection to the request body.
 	pr, pw := io.Pipe()
@@ -154,8 +178,8 @@ func (c *Client) Dial(proto protocol.ProtocolType, target string) (io.ReadWriteC
 	errChan := make(chan error, 1)
 
 	go func() {
-		// Use the captured client instance
-		resp, err := client.Do(req)
+		// Use the selected client instance
+		resp, err := httpClient.Do(req)
 		if err != nil {
 			errChan <- err
 			return
@@ -166,7 +190,7 @@ func (c *Client) Dial(proto protocol.ProtocolType, target string) (io.ReadWriteC
 	select {
 	case resp := <-respChan:
 		// Connection Successful
-		atomic.StoreUint32(&c.failureCount, 0) // Reset failure count
+		atomic.StoreUint32(&pc.failureCount, 0) // Reset failure count
 
 		if resp.StatusCode != http.StatusOK {
 			resp.Body.Close()
@@ -179,57 +203,56 @@ func (c *Client) Dial(proto protocol.ProtocolType, target string) (io.ReadWriteC
 		}, nil
 
 	case err := <-errChan:
-		c.handleConnectionFailure(err)
+		c.handleConnectionFailure(pc, poolIdx, err)
 		return nil, err
 
 	case <-time.After(10 * time.Second):
 		err := fmt.Errorf("connection to server timed out")
-		c.handleConnectionFailure(err)
+		c.handleConnectionFailure(pc, poolIdx, err)
 		return nil, err
 	}
 }
 
-// handleConnectionFailure increments failure count and triggers Hard Reset if needed.
-func (c *Client) handleConnectionFailure(err error) {
-	newCount := atomic.AddUint32(&c.failureCount, 1)
-	log.Printf("Connection Error (%d/%d): %v", newCount, c.Config.HardResetThreshold, err)
+// handleConnectionFailure increments failure count for a specific pooled client and triggers a rebuild if needed.
+func (c *Client) handleConnectionFailure(pc *PooledClient, index int, err error) {
+	newCount := atomic.AddUint32(&pc.failureCount, 1)
+	log.Printf("Connection Error [Pool-%d] (%d/%d): %v", index, newCount, c.Config.HardResetThreshold, err)
 
 	if newCount >= c.Config.HardResetThreshold {
-		c.resetClient()
+		c.resetPooledClient(pc, index)
 	}
 }
 
-// resetClient destroys the old HTTP connection and creates a fresh one.
-func (c *Client) resetClient() {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+// resetPooledClient destroys a degraded HTTP connection within the pool and creates a fresh one.
+func (c *Client) resetPooledClient(pc *PooledClient, index int) {
+	pc.mu.Lock()
+	defer pc.mu.Unlock()
 
 	// Debounce: Check if we reset recently
 	debounceDuration := time.Duration(c.Config.HardResetDebounce) * time.Second
-	if time.Since(c.lastReset) < debounceDuration {
+	if time.Since(pc.lastReset) < debounceDuration {
 		// Reset already happened recently. Just ensure failure count is low and return.
-		atomic.StoreUint32(&c.failureCount, 0)
+		atomic.StoreUint32(&pc.failureCount, 0)
 		return
 	}
 
-	log.Println("WARNING: Network unstable. Destroying and recreating HTTP client (Hard Reset)...")
+	log.Printf("[Watchdog] Connection index %d degraded. Rebuilding...", index)
 
 	// Close old connections to free resources
-	if c.httpClient != nil {
-		c.httpClient.CloseIdleConnections()
+	if pc.client != nil {
+		pc.client.CloseIdleConnections()
 	}
 
-	// Create new client
-	// Note: Creating new http.Client creates new Transport, which creates new TCP connection pool.
-	c.httpClient = c.createHTTPClient()
+	// Create new client specifically for this array index
+	pc.client = c.createHTTPClient()
 
 	// Update timestamp and reset failure count
-	c.lastReset = time.Now()
-	atomic.StoreUint32(&c.failureCount, 0)
+	pc.lastReset = time.Now()
+	atomic.StoreUint32(&pc.failureCount, 0)
 
-	// Backoff
+	// Minimal Backoff
 	time.Sleep(1 * time.Second)
-	log.Println("Client re-initialized. Ready for new connections.")
+	log.Printf("[Watchdog] Connection index %d re-initialized.", index)
 }
 
 // Stream wraps the pipe endpoint to implement io.ReadWriteCloser.
