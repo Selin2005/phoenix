@@ -18,10 +18,12 @@ func LoadServerConfig(filePath string) (*ServerConfig, error) {
 		return nil, fmt.Errorf("failed to read config file: %w", err)
 	}
 
-	config := DefaultServerConfig()
+	config := &ServerConfig{}
 	if err := toml.Unmarshal(data, config); err != nil {
 		return nil, fmt.Errorf("failed to parse TOML configuration: %w", err)
 	}
+
+	// Apply Server defaults if empty (if applicable)
 
 	return config, nil
 }
@@ -36,9 +38,20 @@ func LoadClientConfig(filePath string) (*ClientConfig, error) {
 		return nil, fmt.Errorf("failed to read config file: %w", err)
 	}
 
-	config := DefaultClientConfig()
+	config := &ClientConfig{}
 	if err := toml.Unmarshal(data, config); err != nil {
 		return nil, fmt.Errorf("failed to parse TOML configuration: %w", err)
+	}
+
+	// Apply defaults for any missing non-zero values
+	if config.HardResetThreshold == 0 {
+		config.HardResetThreshold = 3
+	}
+	if config.HardResetDebounce == 0 {
+		config.HardResetDebounce = 5
+	}
+	if config.PoolSize == 0 {
+		config.PoolSize = 5
 	}
 
 	return config, nil
