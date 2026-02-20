@@ -43,3 +43,12 @@ auth = "/home/user/.ssh/id_rsa"
 protocol = "shadowsocks"
 local_addr = "127.0.0.1:8388"
 auth = "chacha20-ietf-poly1305:my-secret-password"
+
+# --- Connection Reliability ---
+# Number of consecutive connection failures before the client performs a hard reset.
+# Default: 3
+hard_reset_threshold = 3
+
+# Minimum time in seconds between hard resets (debounce duration) to prevent rapid loops.
+# Default: 5
+hard_reset_debounce = 5
