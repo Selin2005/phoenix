@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="logo.png" alt="Phoenix Logo" width="200" height="200">
+  <img src="https://fox-fig.github.io/phoenix/logo.png" alt="Phoenix Logo" width="200" height="200">
   <h1>Phoenix</h1>
   <p>
     <img src="https://img.shields.io/badge/License-GPLv2-blue.svg" alt="License">
