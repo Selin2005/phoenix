@@ -60,13 +60,6 @@ features:
     <h3>USDT / TRX (TRC20)</h3>
     <code>TWzNBYVAxFYkJUMv1SNDzqZSaVQmg46ZSL</code>
   </div>
-
-  <!-- TON -->
-  <div class="donate-card">
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><g fill="none" fill-rule="evenodd"><circle cx="16" cy="16" r="16" fill="#0098EA"/><path fill="#FFF" fill-rule="nonzero" d="M15.467 19.34L11 10s5.5 1.5 10 0l-4.467 9.34z"/></g></svg>
-    <h3>Toncoin (TON)</h3>
-    <code>UQAayXQ3iPNBvnu0tXGkFbjcKZrngTIHBpYasEITkCS8y1RH</code>
-  </div>
 </div>
 
 <style>
