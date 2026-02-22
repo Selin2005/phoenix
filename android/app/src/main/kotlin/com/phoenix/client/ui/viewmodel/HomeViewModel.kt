@@ -8,6 +8,7 @@ import androidx.lifecycle.viewModelScope
 import com.phoenix.client.domain.model.ClientConfig
 import com.phoenix.client.domain.repository.ConfigRepository
 import com.phoenix.client.service.PhoenixService
+import com.phoenix.client.service.PhoenixVpnService
 import com.phoenix.client.service.ServiceEvents
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
@@ -173,14 +174,22 @@ class HomeViewModel @Inject constructor(
         }
 
         val ctx = getApplication<Application>()
-        ctx.startForegroundService(PhoenixService.startIntent(ctx, config.value))
+        if (config.value.useVpnMode) {
+            ctx.startForegroundService(PhoenixVpnService.startIntent(ctx, config.value))
+        } else {
+            ctx.startForegroundService(PhoenixService.startIntent(ctx, config.value))
+        }
     }
 
     private fun disconnect() {
         timeoutJob?.cancel()
         stopUptimeClock()
         val ctx = getApplication<Application>()
-        ctx.startService(PhoenixService.stopIntent(ctx))
+        if (config.value.useVpnMode) {
+            ctx.startService(PhoenixVpnService.stopIntent(ctx))
+        } else {
+            ctx.startService(PhoenixService.stopIntent(ctx))
+        }
         _uiState.update { it.copy(connectionStatus = ConnectionStatus.DISCONNECTED, errorMessage = null) }
     }
 
