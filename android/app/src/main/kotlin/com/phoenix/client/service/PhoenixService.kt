@@ -19,6 +19,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import java.io.InterruptedIOException
+import java.util.concurrent.atomic.AtomicBoolean
 
 class PhoenixService : Service() {
 
@@ -42,7 +44,7 @@ class PhoenixService : Service() {
         const val STATUS_EXTRA = "status"
         const val ERROR_EXTRA = "error_message"
 
-        // Log broadcast — one intent per line from Go stdout
+        // Log broadcast — one intent per stdout line from the Go process
         const val LOG_ACTION = "com.phoenix.client.LOG"
         const val LOG_LINE_EXTRA = "log_line"
 
@@ -63,6 +65,12 @@ class PhoenixService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var process: Process? = null
 
+    /**
+     * Set to true before we intentionally destroy the process so that the
+     * InterruptedIOException thrown by forEachLine is not treated as an error.
+     */
+    private val intentionallyStopped = AtomicBoolean(false)
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onCreate() {
@@ -73,17 +81,22 @@ class PhoenixService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_START -> {
+                intentionallyStopped.set(false)
                 val config = intent.toClientConfig()
                 startForeground(NOTIFICATION_ID, buildNotification())
                 scope.launch { launchGoProcess(config) }
             }
-            ACTION_STOP -> stopSelf()
+            ACTION_STOP -> {
+                intentionallyStopped.set(true)
+                stopSelf()
+            }
         }
         return START_NOT_STICKY
     }
 
     override fun onDestroy() {
         super.onDestroy()
+        intentionallyStopped.set(true)
         killProcess()
         scope.cancel()
     }
@@ -96,7 +109,7 @@ class PhoenixService : Service() {
         val binary = try {
             BinaryExtractor.extract(this)
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to locate binary: $e")
+            broadcastLog("ERROR: binary not found — ${e.message}")
             broadcastError("Binary not found: ${e.message}")
             stopSelf()
             return
@@ -105,7 +118,7 @@ class PhoenixService : Service() {
         val configFile = try {
             ConfigWriter.write(this, config)
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to write config: $e")
+            broadcastLog("ERROR: config write failed — ${e.message}")
             broadcastError("Config write failed: ${e.message}")
             stopSelf()
             return
@@ -116,35 +129,62 @@ class PhoenixService : Service() {
             "-config", configFile.absolutePath,
             "-files-dir", filesDir.absolutePath,
         )
-        broadcastLog("Starting: ${cmd.joinToString(" ")}")
+        broadcastLog("CMD: ${cmd.joinToString(" ")}")
+        Log.i(TAG, "Launching: ${cmd.joinToString(" ")}")
 
         try {
             process = ProcessBuilder(*cmd)
                 .redirectErrorStream(true)
                 .start()
 
-            broadcastStatus(ServiceStatus.CONNECTED)
+            // Wait for the Go binary to confirm it is actually listening before
+            // broadcasting CONNECTED. This gives users accurate status and avoids
+            // showing "Connected" during early startup/TLS handshake phases.
+            var listenerStarted = false
 
-            // Stream every line from Go stdout to both Logcat and the UI log panel.
             process!!.inputStream.bufferedReader().forEachLine { line ->
                 Log.i(TAG, "[go] $line")
                 broadcastLog(line)
+
+                if (!listenerStarted && "Listening on" in line) {
+                    listenerStarted = true
+                    broadcastStatus(ServiceStatus.CONNECTED)
+                }
             }
 
             val exitCode = process!!.waitFor()
-            val msg = "Process exited with code $exitCode"
-            Log.i(TAG, msg)
-            broadcastLog(msg)
-            broadcastStatus(ServiceStatus.DISCONNECTED)
+            val exitMsg = "Process exited (code $exitCode)"
+            Log.i(TAG, exitMsg)
+            broadcastLog(exitMsg)
+
+            if (!intentionallyStopped.get()) {
+                if (!listenerStarted) {
+                    // Process died before ever becoming ready
+                    broadcastError("Process exited before listening (code $exitCode) — check logs")
+                } else {
+                    broadcastStatus(ServiceStatus.DISCONNECTED)
+                }
+            }
+        } catch (e: InterruptedIOException) {
+            // Expected when killProcess() calls process.destroy() while forEachLine is
+            // blocking. Only log it — do NOT broadcast an error to the user.
+            Log.d(TAG, "Stream closed (expected on stop): ${e.message}")
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to run Go process: $e")
-            broadcastError("Process error: ${e.message}")
+            if (!intentionallyStopped.get()) {
+                val msg = "Process error: ${e.message}"
+                Log.e(TAG, msg)
+                broadcastLog("ERROR: $msg")
+                broadcastError(msg)
+            }
         } finally {
-            stopSelf()
+            if (!intentionallyStopped.get()) {
+                stopSelf()
+            }
         }
     }
 
     private fun killProcess() {
+        intentionallyStopped.set(true)
         process?.destroy()
         process = null
     }

@@ -1,6 +1,9 @@
 package com.phoenix.client.ui.screen
 
 import android.app.Activity
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
@@ -44,6 +47,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -268,6 +272,7 @@ private fun formatUptime(seconds: Long): String {
 private fun DevLogPanel(logs: List<String>, onClear: () -> Unit) {
     var expanded by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
+    val context = LocalContext.current
 
     // Auto-scroll to bottom on new log lines
     LaunchedEffect(logs.size) {
@@ -292,9 +297,18 @@ private fun DevLogPanel(logs: List<String>, onClear: () -> Unit) {
                     color = Color.Gray,
                 )
             }
+
             if (expanded && logs.isNotEmpty()) {
-                TextButton(onClick = onClear) {
-                    Text("Clear", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+                Row {
+                    TextButton(onClick = {
+                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                        clipboard.setPrimaryClip(ClipData.newPlainText("Phoenix Logs", logs.joinToString("\n")))
+                    }) {
+                        Text("Copy", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+                    }
+                    TextButton(onClick = onClear) {
+                        Text("Clear", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+                    }
                 }
             }
         }
@@ -305,7 +319,7 @@ private fun DevLogPanel(logs: List<String>, onClear: () -> Unit) {
                 color = Color(0xFF0A0A0A),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(200.dp),
+                    .height(220.dp),
             ) {
                 if (logs.isEmpty()) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -317,13 +331,18 @@ private fun DevLogPanel(logs: List<String>, onClear: () -> Unit) {
                         modifier = Modifier.padding(8.dp),
                     ) {
                         items(logs) { line ->
+                            val lineColor = when {
+                                line.startsWith("ERROR") -> Color(0xFFFF6666)
+                                line.startsWith("CMD:") -> Color(0xFFFFCC44)
+                                else -> Color(0xFF88FF88)
+                            }
                             Text(
                                 text = line,
                                 style = MaterialTheme.typography.labelSmall.copy(
                                     fontFamily = FontFamily.Monospace,
                                     fontSize = 11.sp,
                                 ),
-                                color = Color(0xFF88FF88),
+                                color = lineColor,
                                 modifier = Modifier.padding(vertical = 1.dp),
                             )
                         }
