@@ -12,6 +12,7 @@
     <string name="notification_text">SOCKS5 proxy active on 127.0.0.1:10080</string>
     <string name="nav_home">Home</string>
     <string name="nav_config">Configuration</string>
+    <string name="nav_settings">Settings</string>
     <string name="config_server_address">Server Address</string>
     <string name="config_server_address_hint">host:port</string>
     <string name="config_server_pubkey">Server Public Key</string>

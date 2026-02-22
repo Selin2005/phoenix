@@ -21,18 +21,16 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -65,6 +63,7 @@ import com.phoenix.client.ui.viewmodel.HomeViewModel
 @Composable
 fun HomeScreen(viewModel: HomeViewModel = hiltViewModel()) {
     val uiState by viewModel.uiState.collectAsState()
+    val connectionMode by viewModel.connectionMode.collectAsState()
 
     // VPN permission launcher
     val vpnLauncher = rememberLauncherForActivityResult(
@@ -104,37 +103,12 @@ fun HomeScreen(viewModel: HomeViewModel = hiltViewModel()) {
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
 
-        // ── Header: title + mode chips ─────────────────────────────────────
+        // ── Header ─────────────────────────────────────────────────────────
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
         ) {
             Text("Phoenix", style = MaterialTheme.typography.headlineLarge, color = PhoenixOrange)
-
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                val chipEnabled = uiState.connectionStatus == ConnectionStatus.DISCONNECTED ||
-                    uiState.connectionStatus == ConnectionStatus.ERROR
-
-                FilterChip(
-                    selected = uiState.mode == ConnectionMode.SOCKS5,
-                    onClick = { if (chipEnabled) viewModel.setMode(ConnectionMode.SOCKS5) },
-                    label = { Text("Proxy", fontSize = 12.sp) },
-                    colors = FilterChipDefaults.filterChipColors(
-                        selectedContainerColor = PhoenixOrange,
-                        selectedLabelColor = Color.Black,
-                    ),
-                )
-                FilterChip(
-                    selected = uiState.mode == ConnectionMode.VPN,
-                    onClick = { if (chipEnabled) viewModel.setMode(ConnectionMode.VPN) },
-                    label = { Text("VPN", fontSize = 12.sp) },
-                    colors = FilterChipDefaults.filterChipColors(
-                        selectedContainerColor = PhoenixOrange,
-                        selectedLabelColor = Color.Black,
-                    ),
-                )
-            }
         }
 
         Spacer(Modifier.height(32.dp))
@@ -211,7 +185,7 @@ fun HomeScreen(viewModel: HomeViewModel = hiltViewModel()) {
 
         // ── Stats card (always visible after first attempt) ────────────────
         if (uiState.connectionAttempts > 0 || uiState.connectionStatus == ConnectionStatus.CONNECTED) {
-            StatsCard(uiState = uiState)
+            StatsCard(uiState = uiState, connectionMode = connectionMode)
         }
 
         Spacer(Modifier.height(24.dp))
@@ -227,7 +201,10 @@ fun HomeScreen(viewModel: HomeViewModel = hiltViewModel()) {
 // ── Stats card ─────────────────────────────────────────────────────────────────
 
 @Composable
-private fun StatsCard(uiState: com.phoenix.client.ui.viewmodel.HomeUiState) {
+private fun StatsCard(
+    uiState: com.phoenix.client.ui.viewmodel.HomeUiState,
+    connectionMode: ConnectionMode,
+) {
     Surface(
         shape = RoundedCornerShape(12.dp),
         color = PhoenixSurface,
@@ -237,9 +214,12 @@ private fun StatsCard(uiState: com.phoenix.client.ui.viewmodel.HomeUiState) {
             Text("Status", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
             Spacer(Modifier.height(8.dp))
 
-            StatRow(label = "State", value = uiState.connectionStatus.name.lowercase().replaceFirstChar { it.uppercase() })
+            StatRow(
+                label = "State",
+                value = uiState.connectionStatus.name.lowercase().replaceFirstChar { it.uppercase() },
+            )
             StatRow(label = "Attempts", value = uiState.connectionAttempts.toString())
-            StatRow(label = "Mode", value = if (uiState.mode == ConnectionMode.VPN) "VPN" else "SOCKS5 Proxy")
+            StatRow(label = "Mode", value = if (connectionMode == ConnectionMode.VPN) "VPN" else "SOCKS5 Proxy")
 
             if (uiState.connectionStatus == ConnectionStatus.CONNECTED) {
                 StatRow(label = "Uptime", value = formatUptime(uiState.uptimeSeconds))

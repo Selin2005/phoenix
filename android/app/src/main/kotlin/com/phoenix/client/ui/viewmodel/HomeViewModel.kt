@@ -16,6 +16,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
@@ -30,7 +31,6 @@ private const val CONNECT_TIMEOUT_MS = 20_000L
 
 data class HomeUiState(
     val connectionStatus: ConnectionStatus = ConnectionStatus.DISCONNECTED,
-    val mode: ConnectionMode = ConnectionMode.SOCKS5,
     val errorMessage: String? = null,
     // Stats
     val connectionAttempts: Int = 0,
@@ -54,13 +54,16 @@ class HomeViewModel @Inject constructor(
         .observeConfig()
         .stateIn(viewModelScope, SharingStarted.Eagerly, ClientConfig())
 
+    /** Derived from persisted config — drives mode display in the UI. */
+    val connectionMode: StateFlow<ConnectionMode> = config
+        .map { if (it.useVpnMode) ConnectionMode.VPN else ConnectionMode.SOCKS5 }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, ConnectionMode.SOCKS5)
+
     private var uptimeJob: Job? = null
     private var timeoutJob: Job? = null
 
     init {
         // Collect service status events from the in-process SharedFlow.
-        // This replaces the old BroadcastReceiver approach which was unreliable
-        // on some OEM ROMs (Samsung in particular).
         viewModelScope.launch {
             ServiceEvents.status.collect { event ->
                 timeoutJob?.cancel()
@@ -95,11 +98,6 @@ class HomeViewModel @Inject constructor(
     }
 
     // ── Public actions ─────────────────────────────────────────────────────────
-
-    fun setMode(mode: ConnectionMode) {
-        if (_uiState.value.connectionStatus != ConnectionStatus.DISCONNECTED) return
-        _uiState.update { it.copy(mode = mode) }
-    }
 
     /** Called when user taps the main button. Handles connect/cancel/disconnect. */
     fun onMainButtonClicked() {
@@ -140,7 +138,7 @@ class HomeViewModel @Inject constructor(
             return
         }
 
-        if (_uiState.value.mode == ConnectionMode.VPN) {
+        if (currentConfig.useVpnMode) {
             val vpnIntent = VpnService.prepare(getApplication())
             if (vpnIntent != null) {
                 // Emit intent for the UI to launch; actual connection starts in onVpnPermissionGranted()

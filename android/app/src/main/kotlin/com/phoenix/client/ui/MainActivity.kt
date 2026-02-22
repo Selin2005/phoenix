@@ -10,8 +10,9 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.outlined.Create
+import androidx.compose.material.icons.outlined.Home
+import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -19,6 +20,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.NavGraph.Companion.findStartDestination
@@ -29,8 +31,11 @@ import androidx.navigation.compose.rememberNavController
 import com.phoenix.client.R
 import com.phoenix.client.ui.screen.ConfigScreen
 import com.phoenix.client.ui.screen.HomeScreen
+import com.phoenix.client.ui.screen.SettingsScreen
 import com.phoenix.client.ui.theme.PhoenixTheme
 import dagger.hilt.android.AndroidEntryPoint
+
+private data class NavItem(val route: String, val labelRes: Int, val icon: ImageVector)
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
@@ -57,34 +62,32 @@ class MainActivity : ComponentActivity() {
                 val navBackStackEntry by navController.currentBackStackEntryAsState()
                 val currentDestination = navBackStackEntry?.destination
 
+                val navItems = listOf(
+                    NavItem("home", R.string.nav_home, Icons.Outlined.Home),
+                    NavItem("config", R.string.nav_config, Icons.Outlined.Create),
+                    NavItem("settings", R.string.nav_settings, Icons.Outlined.Settings),
+                )
+
                 Scaffold(
                     modifier = Modifier.fillMaxSize(),
                     bottomBar = {
                         NavigationBar {
-                            NavigationBarItem(
-                                selected = currentDestination?.hierarchy?.any { it.route == "home" } == true,
-                                onClick = {
-                                    navController.navigate("home") {
-                                        popUpTo(navController.graph.findStartDestination().id) { saveState = true }
-                                        launchSingleTop = true
-                                        restoreState = true
-                                    }
-                                },
-                                icon = { Icon(Icons.Default.Home, contentDescription = null) },
-                                label = { Text(stringResource(R.string.nav_home)) },
-                            )
-                            NavigationBarItem(
-                                selected = currentDestination?.hierarchy?.any { it.route == "config" } == true,
-                                onClick = {
-                                    navController.navigate("config") {
-                                        popUpTo(navController.graph.findStartDestination().id) { saveState = true }
-                                        launchSingleTop = true
-                                        restoreState = true
-                                    }
-                                },
-                                icon = { Icon(Icons.Default.Settings, contentDescription = null) },
-                                label = { Text(stringResource(R.string.nav_config)) },
-                            )
+                            navItems.forEach { item ->
+                                NavigationBarItem(
+                                    selected = currentDestination?.hierarchy?.any { it.route == item.route } == true,
+                                    onClick = {
+                                        navController.navigate(item.route) {
+                                            popUpTo(navController.graph.findStartDestination().id) {
+                                                saveState = true
+                                            }
+                                            launchSingleTop = true
+                                            restoreState = true
+                                        }
+                                    },
+                                    icon = { Icon(item.icon, contentDescription = null) },
+                                    label = { Text(stringResource(item.labelRes)) },
+                                )
+                            }
                         }
                     },
                 ) { innerPadding ->
@@ -95,6 +98,7 @@ class MainActivity : ComponentActivity() {
                     ) {
                         composable("home") { HomeScreen() }
                         composable("config") { ConfigScreen() }
+                        composable("settings") { SettingsScreen() }
                     }
                 }
             }

@@ -9,6 +9,8 @@ package com.phoenix.client.domain.model
  *                        Empty string = one-way TLS or h2c (no client auth).
  * @param clientPublicKey Base64 client Ed25519 public key — populated after key generation,
  *                        empty when a key file was imported from device storage.
+ * @param useVpnMode      When true, the app starts an Android VpnService for system-wide
+ *                        transparent proxying. When false, only a local SOCKS5 proxy is used.
  * @param localSocksAddr  Local SOCKS5 listen address. Default: 127.0.0.1:10080.
  * @param enableUdp       Whether to allow SOCKS5 UDP ASSOCIATE.
  */
@@ -17,6 +19,7 @@ data class ClientConfig(
     val serverPubKey: String = "",
     val privateKeyFile: String = "",
     val clientPublicKey: String = "",
+    val useVpnMode: Boolean = false,
     val localSocksAddr: String = "127.0.0.1:10080",
     val enableUdp: Boolean = false,
 )
