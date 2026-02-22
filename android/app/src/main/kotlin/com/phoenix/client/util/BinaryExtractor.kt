@@ -4,33 +4,22 @@ import android.content.Context
 import java.io.File
 
 /**
- * Extracts the bundled Go binary from assets to the app's private files directory
- * and marks it executable. Safe to call multiple times — only re-extracts when the
- * asset changes (detected by size mismatch, which covers most updates).
+ * Returns the Go client binary from the app's native library directory.
+ *
+ * The binary is packaged as `libphoenixclient.so` in `jniLibs/arm64-v8a/`
+ * and extracted by the Android installer to `nativeLibraryDir`. That path
+ * is always executable — no chmod needed and no W^X policy restriction.
  */
 object BinaryExtractor {
 
-    private const val ASSET_NAME = "phoenix-client"
+    private const val LIB_NAME = "libphoenixclient.so"
 
-    /**
-     * Returns the [File] pointing to the extracted binary, ready to execute.
-     */
     fun extract(context: Context): File {
-        val dest = File(context.filesDir, ASSET_NAME)
-
-        context.assets.openFd(ASSET_NAME).use { fd ->
-            val assetSize = fd.length
-            if (dest.exists() && dest.length() == assetSize) {
-                return dest // Already up-to-date.
-            }
+        val binary = File(context.applicationInfo.nativeLibraryDir, LIB_NAME)
+        check(binary.exists()) {
+            "Phoenix binary not found at ${binary.absolutePath}. " +
+                "Run 'make android-client' before building the APK."
         }
-
-        context.assets.open(ASSET_NAME).use { input ->
-            dest.outputStream().use { output ->
-                input.copyTo(output)
-            }
-        }
-        dest.setExecutable(true, true)
-        return dest
+        return binary
     }
 }

@@ -42,6 +42,13 @@ android {
     buildFeatures {
         compose = true
     }
+
+    packaging {
+        jniLibs {
+            // Prevent AGP from stripping the Go executable (it's not a real .so)
+            keepDebugSymbols += "**/libphoenixclient.so"
+        }
+    }
 }
 
 dependencies {

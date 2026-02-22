@@ -19,8 +19,8 @@ speedtest: build
 	./bin/speedtest
 
 android-client:
-	mkdir -p android/app/src/main/assets
-	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o android/app/src/main/assets/phoenix-client ./cmd/android-client/
+	mkdir -p android/app/src/main/jniLibs/arm64-v8a
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o android/app/src/main/jniLibs/arm64-v8a/libphoenixclient.so ./cmd/android-client/
 
 clean:
 	rm -rf bin
