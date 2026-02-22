@@ -21,6 +21,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -97,6 +99,7 @@ fun HomeScreen(viewModel: HomeViewModel = hiltViewModel()) {
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .verticalScroll(rememberScrollState())
             .padding(horizontal = 24.dp, vertical = 16.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
@@ -211,9 +214,9 @@ fun HomeScreen(viewModel: HomeViewModel = hiltViewModel()) {
             StatsCard(uiState = uiState)
         }
 
-        Spacer(Modifier.weight(1f))
+        Spacer(Modifier.height(24.dp))
 
-        // ── Developer log panel (collapsible) ─────────────────────────────
+        // ── Developer log panel (collapsible, auto-expands on new logs) ───
         DevLogPanel(
             logs = uiState.logs,
             onClear = viewModel::clearLogs,
@@ -273,6 +276,11 @@ private fun DevLogPanel(logs: List<String>, onClear: () -> Unit) {
     var expanded by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
     val context = LocalContext.current
+
+    // Auto-expand when the first log line arrives so users see output immediately
+    LaunchedEffect(logs.isNotEmpty()) {
+        if (logs.isNotEmpty()) expanded = true
+    }
 
     // Auto-scroll to bottom on new log lines
     LaunchedEffect(logs.size) {

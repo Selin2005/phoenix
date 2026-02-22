@@ -115,7 +115,7 @@ class PhoenixService : Service() {
             return
         }
 
-        val configFile = try {
+        val configResult = try {
             ConfigWriter.write(this, config)
         } catch (e: Exception) {
             broadcastLog("ERROR: config write failed — ${e.message}")
@@ -124,9 +124,14 @@ class PhoenixService : Service() {
             return
         }
 
+        // Log the exact TOML so developers can verify the config in the UI panel
+        broadcastLog("=== client.toml ===")
+        configResult.tomlContent.lines().forEach { broadcastLog(it) }
+        broadcastLog("==================")
+
         val cmd = arrayOf(
             binary.absolutePath,
-            "-config", configFile.absolutePath,
+            "-config", configResult.file.absolutePath,
             "-files-dir", filesDir.absolutePath,
         )
         broadcastLog("CMD: ${cmd.joinToString(" ")}")
