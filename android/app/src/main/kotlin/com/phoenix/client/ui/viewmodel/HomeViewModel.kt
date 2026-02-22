@@ -38,7 +38,7 @@ class HomeViewModel @Inject constructor(
 
     val config: StateFlow<ClientConfig> = configRepository
         .observeConfig()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ClientConfig())
+        .stateIn(viewModelScope, SharingStarted.Eagerly, ClientConfig())
 
     private val statusReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
