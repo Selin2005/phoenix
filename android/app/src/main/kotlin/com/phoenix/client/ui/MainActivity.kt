@@ -96,7 +96,16 @@ class MainActivity : ComponentActivity() {
                         startDestination = "home",
                         modifier = Modifier.padding(innerPadding),
                     ) {
-                        composable("home") { HomeScreen() }
+                        composable("home") {
+                            HomeScreen(
+                                onNavigateToConfig = {
+                                    navController.navigate("config") {
+                                        launchSingleTop = true
+                                        restoreState = true
+                                    }
+                                },
+                            )
+                        }
                         composable("config") { ConfigScreen() }
                         composable("settings") { SettingsScreen() }
                     }

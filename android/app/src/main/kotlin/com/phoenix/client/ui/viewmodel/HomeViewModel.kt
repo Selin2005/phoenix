@@ -60,6 +60,11 @@ class HomeViewModel @Inject constructor(
         .map { if (it.useVpnMode) ConnectionMode.VPN else ConnectionMode.SOCKS5 }
         .stateIn(viewModelScope, SharingStarted.Eagerly, ConnectionMode.SOCKS5)
 
+    /** True when the user has saved a non-blank server address. */
+    val isConfigured: StateFlow<Boolean> = config
+        .map { it.remoteAddr.isNotBlank() }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+
     private var uptimeJob: Job? = null
     private var timeoutJob: Job? = null
 
@@ -100,11 +105,19 @@ class HomeViewModel @Inject constructor(
 
     // ── Public actions ─────────────────────────────────────────────────────────
 
-    /** Called when user taps the main button. Handles connect/cancel/disconnect. */
+    /** Called when user taps the main Connect/Disconnect button. */
     fun onMainButtonClicked() {
         when (_uiState.value.connectionStatus) {
-            ConnectionStatus.CONNECTED, ConnectionStatus.CONNECTING -> disconnect()
+            ConnectionStatus.CONNECTED -> disconnect()
             ConnectionStatus.DISCONNECTED, ConnectionStatus.ERROR -> connect()
+            ConnectionStatus.CONNECTING -> { /* ignored — use the separate Cancel button */ }
+        }
+    }
+
+    /** Called when user taps the Cancel button shown during CONNECTING state. */
+    fun onCancelClicked() {
+        if (_uiState.value.connectionStatus == ConnectionStatus.CONNECTING) {
+            disconnect()
         }
     }
 
