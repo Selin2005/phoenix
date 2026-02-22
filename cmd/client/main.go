@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"phoenix/pkg/adapter/shadowsocks"
 	"phoenix/pkg/adapter/socks5"
 	"phoenix/pkg/config"
 	"phoenix/pkg/crypto"
@@ -31,6 +32,17 @@ func (d *PhoenixTunnelDialer) Dial(target string) (io.ReadWriteCloser, error) {
 		target = ""
 	}
 	return d.Client.Dial(proto, target)
+}
+
+// ShadowsocksDialer implements shadowsocks.Dialer by tunneling through Phoenix server.
+// Since SS decryption happens on the client, we send the extracted target to the server
+// using the Shadowsocks protocol type (server just does target-based TCP relay).
+type ShadowsocksDialer struct {
+	Client *transport.Client
+}
+
+func (d *ShadowsocksDialer) Dial(target string) (io.ReadWriteCloser, error) {
+	return d.Client.Dial(protocol.ProtocolShadowsocks, target)
 }
 
 func main() {
@@ -84,7 +96,15 @@ func main() {
 		wg.Add(1)
 		go func(in config.ClientInbound) {
 			defer wg.Done()
-			startInbound(client, in)
+			if in.Protocol == protocol.ProtocolShadowsocks {
+				// Shadowsocks has its own listener with AEAD cipher wrapping
+				dialer := &ShadowsocksDialer{Client: client}
+				if err := shadowsocks.ListenAndServe(in.LocalAddr, in.Auth, dialer); err != nil {
+					log.Printf("Shadowsocks error: %v", err)
+				}
+			} else {
+				startInbound(client, in)
+			}
 		}(inbound)
 	}
 
@@ -196,25 +216,10 @@ func handleConnection(client *transport.Client, in config.ClientInbound, conn ne
 		}()
 
 	case protocol.ProtocolShadowsocks:
-		// Shadowsocks Inbound.
-		// Simplest: Blind forward to Server.
-		// Assuming Server expects encrypted stream.
-		stream, err := client.Dial(protocol.ProtocolShadowsocks, in.TargetAddr)
-		if err != nil {
-			log.Printf("Failed to dial server: %v", err)
-			conn.Close()
-			return
-		}
-		go func() {
-			defer conn.Close()
-			defer stream.Close()
-			io.Copy(conn, stream)
-		}()
-		go func() {
-			defer conn.Close()
-			defer stream.Close()
-			io.Copy(stream, conn)
-		}()
+		// Shadowsocks connections are handled by shadowsocks.ListenAndServe()
+		// This case should not be reached.
+		log.Printf("Unexpected: SS connection in handleConnection")
+		conn.Close()
 
 	default:
 		log.Printf("Unknown protocol inbound: %s", in.Protocol)

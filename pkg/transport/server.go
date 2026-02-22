@@ -11,7 +11,6 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"phoenix/pkg/adapter/shadowsocks"
 	"phoenix/pkg/adapter/socks5"
 	"phoenix/pkg/adapter/ssh"
 	"phoenix/pkg/config"
@@ -113,7 +112,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 			err = socks5.HandleUDPTunnel(stream)
 		case protocol.ProtocolShadowsocks:
-			err = shadowsocks.HandleConnection(stream)
+			// SS is decrypted on client side; server gets target in header.
+			// If no target, we can't do anything.
+			err = fmt.Errorf("shadowsocks requires target address")
 		case protocol.ProtocolSSH:
 			// No target provided, impossible for tunnel unless Server is destination
 			// or we implement SSH handshake parsing.
