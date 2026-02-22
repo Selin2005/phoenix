@@ -44,7 +44,7 @@ func main() {
 		if err != nil {
 			log.Fatalf("Failed to generate keys: %v", err)
 		}
-		keyPath := filepath.Join(*filesDir, "client_private.key")
+		keyPath := filepath.Join(*filesDir, "client.private.key")
 		if err := os.WriteFile(keyPath, priv, 0600); err != nil {
 			log.Fatalf("Failed to save private key: %v", err)
 		}

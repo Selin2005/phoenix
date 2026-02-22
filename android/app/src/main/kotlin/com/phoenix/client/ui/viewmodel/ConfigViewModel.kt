@@ -1,9 +1,11 @@
 package com.phoenix.client.ui.viewmodel
 
-import androidx.lifecycle.ViewModel
+import android.app.Application
+import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.phoenix.client.domain.model.ClientConfig
 import com.phoenix.client.domain.repository.ConfigRepository
+import com.phoenix.client.util.KeyManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -16,12 +18,17 @@ import javax.inject.Inject
 
 data class ConfigUiState(
     val saved: Boolean = false,
+    val isGeneratingKeys: Boolean = false,
+    /** Non-null after key generation succeeds — shown to user so they can copy to server. */
+    val generatedPublicKey: String? = null,
+    val keyGenError: String? = null,
 )
 
 @HiltViewModel
 class ConfigViewModel @Inject constructor(
+    application: Application,
     private val configRepository: ConfigRepository,
-) : ViewModel() {
+) : AndroidViewModel(application) {
 
     private val _uiState = MutableStateFlow(ConfigUiState())
     val uiState: StateFlow<ConfigUiState> = _uiState.asStateFlow()
@@ -39,5 +46,45 @@ class ConfigViewModel @Inject constructor(
 
     fun consumeSavedEvent() {
         _uiState.update { it.copy(saved = false) }
+    }
+
+    /**
+     * Runs the Go binary with `-gen-keys`, writes `client.private.key` to filesDir,
+     * and exposes the public key via [ConfigUiState.generatedPublicKey].
+     *
+     * On success the private key file field is auto-saved in DataStore so the user
+     * doesn't have to type it manually.
+     */
+    fun generateKeys() {
+        if (_uiState.value.isGeneratingKeys) return
+        _uiState.update { it.copy(isGeneratingKeys = true, keyGenError = null, generatedPublicKey = null) }
+
+        viewModelScope.launch {
+            runCatching {
+                KeyManager.generateKeys(getApplication())
+            }.onSuccess { pair ->
+                // Auto-save the private key file name so the form field is pre-filled.
+                val currentConfig = config.value
+                configRepository.saveConfig(currentConfig.copy(privateKeyFile = pair.privateKeyFile))
+
+                _uiState.update {
+                    it.copy(
+                        isGeneratingKeys = false,
+                        generatedPublicKey = pair.publicKey,
+                    )
+                }
+            }.onFailure { e ->
+                _uiState.update {
+                    it.copy(
+                        isGeneratingKeys = false,
+                        keyGenError = e.message ?: "Unknown error",
+                    )
+                }
+            }
+        }
+    }
+
+    fun dismissPublicKeyDialog() {
+        _uiState.update { it.copy(generatedPublicKey = null, keyGenError = null) }
     }
 }
