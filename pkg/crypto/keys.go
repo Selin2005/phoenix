@@ -2,7 +2,9 @@ package crypto
 
 import (
 	"crypto"
+	"crypto/ecdsa"
 	"crypto/ed25519"
+	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
@@ -48,6 +50,24 @@ func GenerateKeypair() (privPEM []byte, pubKeyStr string, err error) {
 	return privPEM, pubKeyStr, nil
 }
 
+// GenerateECDSAKey generates an ECDSA P256 private key and returns it as PEM bytes.
+// Use this when TLS certificate must be compatible with browser fingerprints (Chrome/Firefox).
+// Unlike Ed25519, ECDSA P256 is universally supported by all TLS clients.
+func GenerateECDSAKey() (privPEM []byte, err error) {
+	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return nil, err
+	}
+	pkcs8Bytes, err := x509.MarshalPKCS8PrivateKey(priv)
+	if err != nil {
+		return nil, err
+	}
+	return pem.EncodeToMemory(&pem.Block{
+		Type:  "PRIVATE KEY",
+		Bytes: pkcs8Bytes,
+	}), nil
+}
+
 // LoadPrivateKey loads a private key from a PEM file.
 func LoadPrivateKey(path string) (crypto.PrivateKey, error) {
 	data, err := os.ReadFile(path)
@@ -69,11 +89,14 @@ func LoadPrivateKey(path string) (crypto.PrivateKey, error) {
 }
 
 // GenerateTLSCertificate creates a self-signed TLS certificate using the given private key.
+// Supports both Ed25519 and ECDSA P256 keys.
 func GenerateTLSCertificate(priv crypto.PrivateKey) (tls.Certificate, error) {
 	// Determine public key
 	var pub crypto.PublicKey
 	switch k := priv.(type) {
 	case ed25519.PrivateKey:
+		pub = k.Public()
+	case *ecdsa.PrivateKey:
 		pub = k.Public()
 	default:
 		return tls.Certificate{}, fmt.Errorf("unsupported key type")

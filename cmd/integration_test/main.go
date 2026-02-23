@@ -1,13 +1,16 @@
 package main
 
 import (
+	"bufio"
 	"encoding/binary"
+	"flag"
 	"fmt"
 	"io"
 	"log"
 	"net"
 	"os"
 	"os/exec"
+	"strings"
 	"time"
 
 	"phoenix/pkg/crypto"
@@ -27,7 +30,12 @@ type suiteConfig struct {
 	EchoUDPPort    uint16
 }
 
+// ─── Main ──────────────────────────────────────────────────
+
 func main() {
+	manual := flag.Bool("manual", false, "Run in interactive manual test mode")
+	flag.Parse()
+
 	// 1. Build binaries
 	log.Println("Building binaries...")
 	cmd := exec.Command("make", "build")
@@ -42,71 +50,67 @@ func main() {
 	go startUDPEchoServer(":9002")
 	time.Sleep(500 * time.Millisecond)
 
-	// ========================================
-	// Phase 1: mTLS Direct
-	// ========================================
-	log.Println("\n====================================")
-	log.Println("  PHASE 1: mTLS Direct Connection")
-	log.Println("====================================")
+	if *manual {
+		runInteractive()
+	} else {
+		runAllPhases()
+	}
+}
 
+// ─── Automatic: All Phases ─────────────────────────────────
+
+func runAllPhases() {
+	// Generate keys once (reused across TLS phases)
 	privServer, pubServer, _ := crypto.GenerateKeypair()
 	privClient, pubClient, _ := crypto.GenerateKeypair()
-	os.WriteFile("server.key", privServer, 0600)
-	os.WriteFile("client.key", privClient, 0600)
+	token, _ := crypto.GenerateToken()
 
-	runSuite(suiteConfig{
-		Name:           "mTLS",
-		ServerConfFile: "test_server_mtls.toml",
-		ClientConfFile: "test_client_mtls.toml",
-		ServerConf: fmt.Sprintf(`
+	keyFiles := []string{"test_server.key", "test_client.key"}
+	os.WriteFile("test_server.key", privServer, 0600)
+	os.WriteFile("test_client.key", privClient, 0600)
+
+	phases := []struct {
+		title string
+		cfg   suiteConfig
+	}{
+		{
+			"PHASE 1: Cleartext h2c (No Auth)",
+			suiteConfig{
+				Name:           "h2c",
+				ServerConfFile: "test_server_h2c.toml",
+				ClientConfFile: "test_client_h2c.toml",
+				ServerConf: `
 listen_addr = ":8080"
 [security]
 enable_socks5 = true
 enable_udp = true
-private_key = "server.key"
-authorized_clients = ["%s"]
-`, pubClient),
-		ClientConf: fmt.Sprintf(`
+`,
+				ClientConf: `
 remote_addr = "127.0.0.1:8080"
-private_key = "client.key"
-server_public_key = "%s"
 [[inbounds]]
 protocol = "socks5"
 local_addr = "127.0.0.1:1080"
 enable_udp = true
-`, pubServer),
-		SOCKS5Addr:  "127.0.0.1:1080",
-		EchoTCPAddr: "127.0.0.1:9001",
-		EchoUDPPort: 9002,
-	})
-
-	// Cleanup phase 1
-	os.Remove("server.key")
-	os.Remove("client.key")
-	os.Remove("test_server_mtls.toml")
-	os.Remove("test_client_mtls.toml")
-
-	// ========================================
-	// Phase 2: h2c + Token Auth
-	// ========================================
-	log.Println("\n====================================")
-	log.Println("  PHASE 2: Token Auth (h2c)")
-	log.Println("====================================")
-
-	token, _ := crypto.GenerateToken()
-
-	runSuite(suiteConfig{
-		Name:           "Token",
-		ServerConfFile: "test_server_token.toml",
-		ClientConfFile: "test_client_token.toml",
-		ServerConf: fmt.Sprintf(`
+`,
+				SOCKS5Addr:  "127.0.0.1:1080",
+				EchoTCPAddr: "127.0.0.1:9001",
+				EchoUDPPort: 9002,
+			},
+		},
+		{
+			"PHASE 2: h2c + Token Auth",
+			suiteConfig{
+				Name:           "Token",
+				ServerConfFile: "test_server_token.toml",
+				ClientConfFile: "test_client_token.toml",
+				ServerConf: fmt.Sprintf(`
 listen_addr = ":8081"
 [security]
 auth_token = "%s"
 enable_socks5 = true
 enable_udp = true
 `, token),
-		ClientConf: fmt.Sprintf(`
+				ClientConf: fmt.Sprintf(`
 remote_addr = "127.0.0.1:8081"
 auth_token = "%s"
 [[inbounds]]
@@ -114,26 +118,418 @@ protocol = "socks5"
 local_addr = "127.0.0.1:1081"
 enable_udp = true
 `, token),
-		SOCKS5Addr:  "127.0.0.1:1081",
-		EchoTCPAddr: "127.0.0.1:9001",
-		EchoUDPPort: 9002,
-	})
+				SOCKS5Addr:  "127.0.0.1:1081",
+				EchoTCPAddr: "127.0.0.1:9001",
+				EchoUDPPort: 9002,
+			},
+		},
+		{
+			"PHASE 3: One-Way TLS (Ed25519 key pinning)",
+			suiteConfig{
+				Name:           "OneWayTLS",
+				ServerConfFile: "test_server_owtls.toml",
+				ClientConfFile: "test_client_owtls.toml",
+				ServerConf: `
+listen_addr = ":8082"
+[security]
+enable_socks5 = true
+enable_udp = true
+private_key = "test_server.key"
+`,
+				ClientConf: fmt.Sprintf(`
+remote_addr = "127.0.0.1:8082"
+server_public_key = "%s"
+[[inbounds]]
+protocol = "socks5"
+local_addr = "127.0.0.1:1082"
+enable_udp = true
+`, pubServer),
+				SOCKS5Addr:  "127.0.0.1:1082",
+				EchoTCPAddr: "127.0.0.1:9001",
+				EchoUDPPort: 9002,
+			},
+		},
+		{
+			"PHASE 4: mTLS (Mutual Ed25519)",
+			suiteConfig{
+				Name:           "mTLS",
+				ServerConfFile: "test_server_mtls.toml",
+				ClientConfFile: "test_client_mtls.toml",
+				ServerConf: fmt.Sprintf(`
+listen_addr = ":8083"
+[security]
+enable_socks5 = true
+enable_udp = true
+private_key = "test_server.key"
+authorized_clients = ["%s"]
+`, pubClient),
+				ClientConf: fmt.Sprintf(`
+remote_addr = "127.0.0.1:8083"
+private_key = "test_client.key"
+server_public_key = "%s"
+[[inbounds]]
+protocol = "socks5"
+local_addr = "127.0.0.1:1083"
+enable_udp = true
+`, pubServer),
+				SOCKS5Addr:  "127.0.0.1:1083",
+				EchoTCPAddr: "127.0.0.1:9001",
+				EchoUDPPort: 9002,
+			},
+		},
+		{
+			"PHASE 5: Insecure TLS + Token Auth",
+			suiteConfig{
+				Name:           "InsecureTLS+Token",
+				ServerConfFile: "test_server_inssec.toml",
+				ClientConfFile: "test_client_inssec.toml",
+				ServerConf: fmt.Sprintf(`
+listen_addr = ":8084"
+[security]
+enable_socks5 = true
+enable_udp = true
+private_key = "test_server.key"
+auth_token = "%s"
+`, token),
+				ClientConf: fmt.Sprintf(`
+remote_addr = "127.0.0.1:8084"
+tls_mode = "insecure"
+auth_token = "%s"
+[[inbounds]]
+protocol = "socks5"
+local_addr = "127.0.0.1:1084"
+enable_udp = true
+`, token),
+				SOCKS5Addr:  "127.0.0.1:1084",
+				EchoTCPAddr: "127.0.0.1:9001",
+				EchoUDPPort: 9002,
+			},
+		},
+		{
+			"PHASE 6: Insecure TLS + Chrome Fingerprint",
+			suiteConfig{
+				Name:           "InsecureTLS+Fingerprint",
+				ServerConfFile: "test_server_fp.toml",
+				ClientConfFile: "test_client_fp.toml",
+				ServerConf: `
+listen_addr = ":8085"
+[security]
+enable_socks5 = true
+enable_udp = true
+private_key = "test_server.key"
+`,
+				ClientConf: `
+remote_addr = "127.0.0.1:8085"
+tls_mode = "insecure"
+fingerprint = "chrome"
+[[inbounds]]
+protocol = "socks5"
+local_addr = "127.0.0.1:1085"
+enable_udp = true
+`,
+				SOCKS5Addr:  "127.0.0.1:1085",
+				EchoTCPAddr: "127.0.0.1:9001",
+				EchoUDPPort: 9002,
+			},
+		},
+	}
 
-	// Cleanup phase 2
-	os.Remove("test_server_token.toml")
-	os.Remove("test_client_token.toml")
+	passed := 0
+	for i, p := range phases {
+		fmt.Printf("\n====================================\n")
+		fmt.Printf("  %s\n", p.title)
+		fmt.Printf("====================================\n")
+		runSuite(p.cfg)
+		passed++
+		// Cleanup
+		os.Remove(p.cfg.ServerConfFile)
+		os.Remove(p.cfg.ClientConfFile)
+		_ = i
+	}
 
-	log.Println("\n====================================")
-	log.Println("  ALL PHASES PASSED ✓")
-	log.Println("====================================")
+	// Cleanup key files
+	for _, f := range keyFiles {
+		os.Remove(f)
+	}
+
+	fmt.Printf("\n====================================\n")
+	fmt.Printf("  ALL %d PHASES PASSED ✓\n", passed)
+	fmt.Printf("====================================\n")
 }
 
-func runSuite(cfg suiteConfig) {
-	log.Printf("[%s] Writing configs...", cfg.Name)
+// ─── Interactive / Manual Mode ─────────────────────────────
+
+func runInteractive() {
+	r := bufio.NewReader(os.Stdin)
+	ask := func(prompt string) string {
+		fmt.Print(prompt)
+		line, _ := r.ReadString('\n')
+		return strings.TrimSpace(line)
+	}
+
+	fmt.Println("\n╔══════════════════════════════════════╗")
+	fmt.Println("║   Phoenix Manual Connection Test     ║")
+	fmt.Println("╚══════════════════════════════════════╝")
+
+	// --- TLS Mode ---
+	fmt.Println("\n[1] TLS Mode:")
+	fmt.Println("  1) h2c                  (no TLS, direct)")
+	fmt.Println("  2) insecure             (TLS, skip cert verify)")
+	fmt.Println("  3) One-Way TLS          (Ed25519 key pinning)")
+	fmt.Println("  4) mTLS                 (mutual Ed25519)")
+	tlsChoice := ask("  Choice [1-4]: ")
+
+	// --- Token Auth ---
+	fmt.Println("\n[2] Token Auth:")
+	tokenChoice := ask("  Enable token auth? (y/n): ")
+	useToken := strings.ToLower(tokenChoice) == "y"
+
+	// --- Fingerprint ---
+	useTLS := tlsChoice != "1"
+	fingerprint := ""
+	if useTLS {
+		fmt.Println("\n[3] TLS Fingerprint (browser impersonation):")
+		fmt.Println("  1) none     (Go default)")
+		fmt.Println("  2) chrome   (recommended)")
+		fmt.Println("  3) firefox")
+		fmt.Println("  4) safari")
+		fmt.Println("  5) random")
+		fpChoice := ask("  Choice [1-5]: ")
+		switch fpChoice {
+		case "2":
+			fingerprint = "chrome"
+		case "3":
+			fingerprint = "firefox"
+		case "4":
+			fingerprint = "safari"
+		case "5":
+			fingerprint = "random"
+		}
+	}
+
+	// --- Test Type ---
+	fmt.Println("\n[4] Tests to run:")
+	fmt.Println("  1) TCP only")
+	fmt.Println("  2) UDP only")
+	fmt.Println("  3) TCP + UDP + Speed (full)")
+	testChoice := ask("  Choice [1-3]: ")
+
+	// --- Port ---
+	fmt.Println()
+	serverPort := ask("  Server port [default: 9100]: ")
+	if serverPort == "" {
+		serverPort = "9100"
+	}
+	clientPort := ask("  Client SOCKS5 port [default: 9180]: ")
+	if clientPort == "" {
+		clientPort = "9180"
+	}
+
+	// Build configs
+	privServer, pubServer, _ := crypto.GenerateKeypair()
+	privClient, pubClient, _ := crypto.GenerateKeypair()
+	token, _ := crypto.GenerateToken()
+
+	os.WriteFile("manual_server.key", privServer, 0600)
+	os.WriteFile("manual_client.key", privClient, 0600)
+	defer os.Remove("manual_server.key")
+	defer os.Remove("manual_client.key")
+
+	serverConf, clientConf := buildManualConfigs(
+		tlsChoice, useToken, fingerprint,
+		serverPort, clientPort,
+		pubServer, pubClient, token,
+	)
+
+	name := fmt.Sprintf("Manual(%s)", describeMode(tlsChoice, useToken, fingerprint))
+	cfg := suiteConfig{
+		Name:           name,
+		ServerConfFile: "manual_server_test.toml",
+		ClientConfFile: "manual_client_test.toml",
+		ServerConf:     serverConf,
+		ClientConf:     clientConf,
+		SOCKS5Addr:     "127.0.0.1:" + clientPort,
+		EchoTCPAddr:    "127.0.0.1:9001",
+		EchoUDPPort:    9002,
+	}
+
+	fmt.Printf("\n====================================\n")
+	fmt.Printf("  Running: %s\n", name)
+	fmt.Printf("====================================\n")
+
+	runSuiteSelective(cfg, testChoice)
+
+	os.Remove(cfg.ServerConfFile)
+	os.Remove(cfg.ClientConfFile)
+
+	fmt.Printf("\n====================================\n")
+	fmt.Printf("  Manual Test PASSED ✓\n")
+	fmt.Printf("====================================\n")
+}
+
+func buildManualConfigs(tlsChoice string, useToken bool, fingerprint, serverPort, clientPort, pubServer, pubClient, token string) (serverConf, clientConf string) {
+	tokenLine := ""
+	clientTokenLine := ""
+	if useToken {
+		tokenLine = fmt.Sprintf(`auth_token = "%s"`, token)
+		clientTokenLine = fmt.Sprintf(`auth_token = "%s"`, token)
+	}
+
+	fpLine := ""
+	if fingerprint != "" {
+		fpLine = fmt.Sprintf(`fingerprint = "%s"`, fingerprint)
+	}
+
+	switch tlsChoice {
+	case "2": // insecure TLS
+		serverConf = fmt.Sprintf(`
+listen_addr = ":%s"
+[security]
+enable_socks5 = true
+enable_udp = true
+private_key = "manual_server.key"
+%s
+`, serverPort, tokenLine)
+		clientConf = fmt.Sprintf(`
+remote_addr = "127.0.0.1:%s"
+tls_mode = "insecure"
+%s
+%s
+[[inbounds]]
+protocol = "socks5"
+local_addr = "127.0.0.1:%s"
+enable_udp = true
+`, serverPort, clientTokenLine, fpLine, clientPort)
+
+	case "3": // One-Way TLS
+		serverConf = fmt.Sprintf(`
+listen_addr = ":%s"
+[security]
+enable_socks5 = true
+enable_udp = true
+private_key = "manual_server.key"
+%s
+`, serverPort, tokenLine)
+		clientConf = fmt.Sprintf(`
+remote_addr = "127.0.0.1:%s"
+server_public_key = "%s"
+%s
+%s
+[[inbounds]]
+protocol = "socks5"
+local_addr = "127.0.0.1:%s"
+enable_udp = true
+`, serverPort, pubServer, clientTokenLine, fpLine, clientPort)
+
+	case "4": // mTLS
+		serverConf = fmt.Sprintf(`
+listen_addr = ":%s"
+[security]
+enable_socks5 = true
+enable_udp = true
+private_key = "manual_server.key"
+authorized_clients = ["%s"]
+%s
+`, serverPort, pubClient, tokenLine)
+		clientConf = fmt.Sprintf(`
+remote_addr = "127.0.0.1:%s"
+private_key = "manual_client.key"
+server_public_key = "%s"
+%s
+%s
+[[inbounds]]
+protocol = "socks5"
+local_addr = "127.0.0.1:%s"
+enable_udp = true
+`, serverPort, pubServer, clientTokenLine, fpLine, clientPort)
+
+	default: // h2c
+		serverConf = fmt.Sprintf(`
+listen_addr = ":%s"
+[security]
+enable_socks5 = true
+enable_udp = true
+%s
+`, serverPort, tokenLine)
+		clientConf = fmt.Sprintf(`
+remote_addr = "127.0.0.1:%s"
+%s
+[[inbounds]]
+protocol = "socks5"
+local_addr = "127.0.0.1:%s"
+enable_udp = true
+`, serverPort, clientTokenLine, clientPort)
+	}
+	return
+}
+
+func describeMode(tlsChoice string, useToken bool, fingerprint string) string {
+	modes := map[string]string{"1": "h2c", "2": "insecure", "3": "one-way-tls", "4": "mTLS"}
+	mode := modes[tlsChoice]
+	if useToken {
+		mode += "+token"
+	}
+	if fingerprint != "" {
+		mode += "+" + fingerprint
+	}
+	return mode
+}
+
+func runSuiteSelective(cfg suiteConfig, testChoice string) {
 	os.WriteFile(cfg.ServerConfFile, []byte(cfg.ServerConf), 0644)
 	os.WriteFile(cfg.ClientConfFile, []byte(cfg.ClientConf), 0644)
 
-	// Start Server
+	log.Printf("[%s] Starting Server...", cfg.Name)
+	serverCmd := exec.Command("./bin/server", "--config", cfg.ServerConfFile)
+	serverCmd.Stdout = os.Stdout
+	serverCmd.Stderr = os.Stderr
+	if err := serverCmd.Start(); err != nil {
+		log.Fatalf("[%s] Failed to start server: %v", cfg.Name, err)
+	}
+	defer func() { serverCmd.Process.Kill(); serverCmd.Wait() }()
+
+	log.Printf("[%s] Starting Client...", cfg.Name)
+	clientCmd := exec.Command("./bin/client", "--config", cfg.ClientConfFile)
+	clientCmd.Stdout = os.Stdout
+	clientCmd.Stderr = os.Stderr
+	if err := clientCmd.Start(); err != nil {
+		log.Fatalf("[%s] Failed to start client: %v", cfg.Name, err)
+	}
+	defer func() { clientCmd.Process.Kill(); clientCmd.Wait() }()
+
+	time.Sleep(2 * time.Second)
+
+	switch testChoice {
+	case "1": // TCP only
+		log.Printf("[%s] === TCP Test ===", cfg.Name)
+		testTCP(cfg.SOCKS5Addr, cfg.EchoTCPAddr)
+		log.Printf("[%s] === TCP Speed (10MB) ===", cfg.Name)
+		testTCPSpeed(cfg.SOCKS5Addr, cfg.EchoTCPAddr, 10*1024*1024)
+	case "2": // UDP only
+		log.Printf("[%s] === UDP Test ===", cfg.Name)
+		testUDP(cfg.SOCKS5Addr, cfg.EchoUDPPort)
+		log.Printf("[%s] === UDP Stress (1000 pkt) ===", cfg.Name)
+		testUDPStress(cfg.SOCKS5Addr, cfg.EchoUDPPort)
+	default: // full
+		log.Printf("[%s] === TCP Test ===", cfg.Name)
+		testTCP(cfg.SOCKS5Addr, cfg.EchoTCPAddr)
+		log.Printf("[%s] === TCP Speed (10MB) ===", cfg.Name)
+		testTCPSpeed(cfg.SOCKS5Addr, cfg.EchoTCPAddr, 10*1024*1024)
+		log.Printf("[%s] === UDP Test ===", cfg.Name)
+		testUDP(cfg.SOCKS5Addr, cfg.EchoUDPPort)
+		log.Printf("[%s] === UDP Stress (1000 pkt) ===", cfg.Name)
+		testUDPStress(cfg.SOCKS5Addr, cfg.EchoUDPPort)
+	}
+
+	log.Printf("[%s] === PASSED ===", cfg.Name)
+}
+
+// ─── runSuite (automatic) ──────────────────────────────────
+
+func runSuite(cfg suiteConfig) {
+	os.WriteFile(cfg.ServerConfFile, []byte(cfg.ServerConf), 0644)
+	os.WriteFile(cfg.ClientConfFile, []byte(cfg.ClientConf), 0644)
+
 	log.Printf("[%s] Starting Phoenix Server...", cfg.Name)
 	serverCmd := exec.Command("./bin/server", "--config", cfg.ServerConfFile)
 	serverCmd.Stdout = os.Stdout
@@ -141,12 +537,8 @@ func runSuite(cfg suiteConfig) {
 	if err := serverCmd.Start(); err != nil {
 		log.Fatalf("[%s] Failed to start server: %v", cfg.Name, err)
 	}
-	defer func() {
-		serverCmd.Process.Kill()
-		serverCmd.Wait()
-	}()
+	defer func() { serverCmd.Process.Kill(); serverCmd.Wait() }()
 
-	// Start Client
 	log.Printf("[%s] Starting Phoenix Client...", cfg.Name)
 	clientCmd := exec.Command("./bin/client", "--config", cfg.ClientConfFile)
 	clientCmd.Stdout = os.Stdout
@@ -154,35 +546,26 @@ func runSuite(cfg suiteConfig) {
 	if err := clientCmd.Start(); err != nil {
 		log.Fatalf("[%s] Failed to start client: %v", cfg.Name, err)
 	}
-	defer func() {
-		clientCmd.Process.Kill()
-		clientCmd.Wait()
-	}()
+	defer func() { clientCmd.Process.Kill(); clientCmd.Wait() }()
 
 	time.Sleep(2 * time.Second)
 
-	// TCP Test
 	log.Printf("[%s] === Testing TCP via SOCKS5 ===", cfg.Name)
 	testTCP(cfg.SOCKS5Addr, cfg.EchoTCPAddr)
 
-	// TCP Speed Test
 	log.Printf("[%s] === Testing TCP Speed (10MB) ===", cfg.Name)
 	testTCPSpeed(cfg.SOCKS5Addr, cfg.EchoTCPAddr, 10*1024*1024)
 
-	// UDP Test
 	log.Printf("[%s] === Testing UDP via SOCKS5 ===", cfg.Name)
 	testUDP(cfg.SOCKS5Addr, cfg.EchoUDPPort)
 
-	// UDP Stress Test
 	log.Printf("[%s] === Testing UDP Speed (1000 Packets) ===", cfg.Name)
 	testUDPStress(cfg.SOCKS5Addr, cfg.EchoUDPPort)
 
 	log.Printf("[%s] === ALL TESTS PASSED ===", cfg.Name)
 }
 
-// ========================================
-// Test Functions
-// ========================================
+// ─── Test Functions ────────────────────────────────────────
 
 func testTCP(proxyAddr, targetAddr string) {
 	dialer, err := proxy.SOCKS5("tcp", proxyAddr, nil, proxy.Direct)
@@ -259,7 +642,6 @@ func testUDP(proxyAddr string, echoUDPPort uint16) {
 	}
 	defer conn.Close()
 
-	// Handshake
 	conn.Write([]byte{0x05, 0x01, 0x00})
 	buf := make([]byte, 2)
 	if _, err := io.ReadFull(conn, buf); err != nil {
@@ -269,11 +651,9 @@ func testUDP(proxyAddr string, echoUDPPort uint16) {
 		log.Fatalf("UDP Handshake Method rejected: %v", buf)
 	}
 
-	// Request UDP ASSOCIATE
 	req := []byte{0x05, 0x03, 0x00, 0x01, 0, 0, 0, 0, 0, 0}
 	conn.Write(req)
 
-	// Read Reply
 	reply := make([]byte, 10)
 	if _, err := io.ReadFull(conn, reply); err != nil {
 		log.Fatalf("UDP Handshake Reply Read failed: %v", err)
@@ -298,14 +678,12 @@ func testUDP(proxyAddr string, echoUDPPort uint16) {
 	relayAddr := net.JoinHostPort(proxyHost, fmt.Sprint(relayPort))
 	log.Printf("UDP Relay is at: %s", relayAddr)
 
-	// Send UDP Packet
 	uConn, err := net.Dial("udp", relayAddr)
 	if err != nil {
 		log.Fatalf("UDP Dial failed: %v", err)
 	}
 	defer uConn.Close()
 
-	// SOCKS5 UDP Header
 	pkt := make([]byte, 0, 1024)
 	pkt = append(pkt, 0x00, 0x00, 0x00, 0x01)
 	pkt = append(pkt, []byte{127, 0, 0, 1}...)
@@ -320,7 +698,6 @@ func testUDP(proxyAddr string, echoUDPPort uint16) {
 		log.Fatalf("UDP Write failed: %v", err)
 	}
 
-	// Read Reply
 	resp := make([]byte, 1024)
 	uConn.SetReadDeadline(time.Now().Add(5 * time.Second))
 	n, err := uConn.Read(resp)
@@ -345,16 +722,13 @@ func testUDPStress(proxyAddr string, echoUDPPort uint16) {
 	}
 	defer conn.Close()
 
-	// Handshake
 	conn.Write([]byte{0x05, 0x01, 0x00})
 	buf := make([]byte, 2)
 	io.ReadFull(conn, buf)
 
-	// Request UDP ASSOCIATE
 	req := []byte{0x05, 0x03, 0x00, 0x01, 0, 0, 0, 0, 0, 0}
 	conn.Write(req)
 
-	// Read Reply
 	reply := make([]byte, 10)
 	io.ReadFull(conn, reply)
 
@@ -372,14 +746,12 @@ func testUDPStress(proxyAddr string, echoUDPPort uint16) {
 	relayAddr := net.JoinHostPort(proxyHost, fmt.Sprint(relayPort))
 	log.Printf("Stress UDP Relay: %s", relayAddr)
 
-	// Send Stream
 	uConn, err := net.Dial("udp", relayAddr)
 	if err != nil {
 		log.Fatalf("Stress UDP Dial failed: %v", err)
 	}
 	defer uConn.Close()
 
-	// SOCKS5 UDP Header
 	basePkt := make([]byte, 0, 1500)
 	basePkt = append(basePkt, 0x00, 0x00, 0x00, 0x01)
 	basePkt = append(basePkt, []byte{127, 0, 0, 1}...)
@@ -391,7 +763,6 @@ func testUDPStress(proxyAddr string, echoUDPPort uint16) {
 	payloadSize := 1000
 	totalPackets := 1000
 
-	// Receiver
 	receivedCount := 0
 	doneChan := make(chan bool)
 	go func() {
@@ -442,9 +813,7 @@ func testUDPStress(proxyAddr string, echoUDPPort uint16) {
 	}
 }
 
-// ========================================
-// Echo Servers
-// ========================================
+// ─── Echo Servers ──────────────────────────────────────────
 
 func startTCPEchoServer(addr string) {
 	l, err := net.Listen("tcp", addr)
