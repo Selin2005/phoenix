@@ -1,64 +1,77 @@
-# Phoenix Client Configuration Example
-# This configuration file defines how the Phoenix client operates.
-# The client connects to the Phoenix server and opens multiple local listeners.
+# ═══════════════════════════════════════════════════════════
+#  Phoenix Client Configuration
+# ═══════════════════════════════════════════════════════════
 
 # remote_addr: The address of the Phoenix server.
-# Example: "example.com:8080" (h2c) or "example.com:8443" (mTLS)
+#   - Direct:     "SERVER_IP:8080"     (h2c)
+#   - Direct TLS: "SERVER_IP:443"      (TLS)
+#   - Cloudflare: "your-domain.com:443" (CDN)
 remote_addr = "127.0.0.1:8080"
 
-# --- TLS Mode ---
-# tls_mode: Controls how TLS certificates are verified.
+# ═══════════════════════════════════════════════════════════
+#  Security
+# ═══════════════════════════════════════════════════════════
+
+# ─── TLS Mode ─────────────────────────────────────────────
+# Controls how the client handles TLS.
 #
-#   ""         (empty/omitted) = Use Phoenix Ed25519 key pinning or plain h2c.
-#              Use this for direct connections (with or without auth_token).
-#
-#   "system"   = Use OS system CA store — for CDN/Cloudflare setups ONLY.
-#              ⚠️  The server must have Cloudflare (or another TLS terminator) in front.
-#              ⚠️  Does NOT work for direct IP/port connections to a plain h2c server.
-#
-#   "insecure" = HTTPS but skip certificate verification.
-#              Use for direct connections to a server with self-signed TLS cert (private_key set).
-#              ⚠️  Vulnerable to MITM — use only on trusted networks or for testing.
+#   ""          (omit) → Cleartext h2c. For direct connections to h2c servers.
+#   "system"           → HTTPS with OS CA verification. For CDN/Cloudflare only.
+#   "insecure"         → HTTPS but skip cert verification. For direct connections
+#                         to servers with self-signed TLS certs (testing only).
 #
 # tls_mode = "system"
 
-# auth_token: Must match the server's auth_token for authentication.
+# ─── Token Authentication ──────────────────────────────────
+# Shared secret. Must match the server's auth_token.
+# Generate a token:  ./client -gen-token
+#
 # auth_token = "your-secret-token-here"
 
-# --- Secure Authentication (mTLS / One-Way TLS) ---
-# To enable secure mode, generate keys with `./server -gen-keys`.
-# You MUST provide the Server's Public Key (`server_public_key`) to prevent MITM attacks.
+# ─── Key-Based Authentication (Ed25519) ───────────────────
+# Generate keys:  ./client -gen-keys
 #
-# If you provide `private_key`, Mutual TLS (mTLS) is used (Client Auth).
-# If you OMIT `private_key` but provide `server_public_key`, One-Way TLS is used (Anonymous Client).
+# server_public_key: The server's public key (Base64). Enables key pinning.
+#   - Required for One-Way TLS and mTLS.
+#   - Not needed when using tls_mode = "system" (CDN handles verification).
 #
-# private_key = "client.private.key"
+# private_key: Path to the client's Ed25519 private key (PEM).
+#   - If set → mTLS mode: client authenticates with its key.
+#   - If omitted → One-Way TLS: no client certificate sent.
+#
 # server_public_key = "SERVER_PUBLIC_KEY..."
+# private_key = "client.private.key"
 
-# [[inbounds]]: Defines a list of local listeners.
-# Each inbound listener opens a local port and tunnels traffic of a specific protocol.
+# ─── Quickstart: Which settings for which scenario? ──────
+#
+#  Scenario                    | tls_mode   | auth_token | keys
+#  ──────────────────────────────────────────────────────────────
+#  Direct, no security         | (omit)     | (omit)     | (omit)
+#  Direct + Token              | (omit)     | ✓          | (omit)
+#  Direct + mTLS               | (omit)     | (optional) | ✓ both
+#  Direct + One-Way TLS        | (omit)     | (optional) | server_public_key
+#  Direct + self-signed TLS    | "insecure" | (optional) | (omit)
+#  Cloudflare + Token          | "system"   | ✓          | (omit)
 
-# Example 1: Local SOCKS5 Proxy
+# ═══════════════════════════════════════════════════════════
+#  Inbound Listeners
+# ═══════════════════════════════════════════════════════════
+# Each [[inbounds]] entry opens a local port for a specific protocol.
+
+# ─── SOCKS5 Proxy ─────────────────────────────────────────
 [[inbounds]]
-# protocol: The type of traffic to handle.
-# Supported values: "socks5", "shadowsocks", "ssh"
 protocol = "socks5"
-# local_addr: The local address and port to bind on.
 local_addr = "127.0.0.1:1080"
-# enable_udp: Allow SOCKS5 UDP Associate.
 enable_udp = true
-# auth: Optional. For Shadowsocks, this would be the password/method. For SSH, key path.
-# auth = ""
 
-# Example 2: Local SSH Tunnel Endpoint
-[[inbounds]]
-protocol = "ssh"
-local_addr = "127.0.0.1:2022"
-# auth: Not strictly required for simple forwarding, but can be used for client-side auth.
-auth = "/home/user/.ssh/id_rsa"
+# ─── SSH Tunnel ───────────────────────────────────────────
+# [[inbounds]]
+# protocol = "ssh"
+# local_addr = "127.0.0.1:2022"
+# auth = "/home/user/.ssh/id_rsa"
 
-# Example 3: Shadowsocks Proxy
-[[inbounds]]
-protocol = "shadowsocks"
-local_addr = "127.0.0.1:8388"
-auth = "chacha20-ietf-poly1305:my-secret-password"
+# ─── Shadowsocks Proxy ───────────────────────────────────
+# [[inbounds]]
+# protocol = "shadowsocks"
+# local_addr = "127.0.0.1:8388"
+# auth = "aes-256-gcm:my-secret-password"
