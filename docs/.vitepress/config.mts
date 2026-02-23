@@ -70,9 +70,11 @@ export default withMermaid(defineConfig({
               { text: 'Getting Started', link: '/guide/getting-started' },
               { text: 'Installation', link: '/guide/installation' },
               { text: 'Advanced Configuration', link: '/guide/configuration' },
+              { text: 'Manage Inbounds', link: '/guide/inbounds' },
               { text: 'Manage with Systemd', link: '/guide/systemd' },
               { text: 'Troubleshooting & Logs', link: '/guide/troubleshooting' },
-              { text: 'Architecture & Security', link: '/guide/architecture' }
+              { text: 'Architecture & Security', link: '/guide/architecture' },
+              { text: 'Changelog', link: '/guide/changelog' }
             ]
           }
         ],
