@@ -1,7 +1,7 @@
 
-.PHONY: all fmt test build clean speedtest android-client
+.PHONY: all fmt test build clean speedtest android-client android-check sync-upstream
 
-all: fmt test build
+all: fmt test build android-check
 
 fmt:
 	go fmt ./...
@@ -21,6 +21,24 @@ speedtest: build
 android-client:
 	mkdir -p android/app/src/main/jniLibs/arm64-v8a
 	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o android/app/src/main/jniLibs/arm64-v8a/libphoenixclient.so ./cmd/android-client/
+
+# Compile-only check — fast, no output file written.
+# Run this after every upstream sync to catch broken imports early.
+android-check:
+	@echo "Checking android-client compiles for linux/arm64..."
+	@CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o /dev/null ./cmd/android-client/ && \
+		echo "android-client: OK" || \
+		(echo "android-client: FAILED — fix cmd/android-client/ before committing" && exit 1)
+
+# Pull latest upstream changes and verify both builds still pass.
+# Usage: make sync-upstream
+sync-upstream:
+	git fetch upstream
+	git checkout main && git merge upstream/main
+	git checkout feature/android-client && git rebase upstream/main
+	@$(MAKE) build
+	@$(MAKE) android-check
+	@echo "Sync complete — all builds passing."
 
 clean:
 	rm -rf bin
