@@ -65,9 +65,14 @@ func runAllPhases() {
 	privClient, pubClient, _ := crypto.GenerateKeypair()
 	token, _ := crypto.GenerateToken()
 
-	keyFiles := []string{"test_server.key", "test_client.key"}
+	// ECDSA P256 key for Phase 6 (Chrome fingerprint)
+	// Chrome's uTLS ClientHello doesn't advertise Ed25519 as a valid server cert algorithm.
+	ecdsaKey, _ := crypto.GenerateECDSAKey()
+
+	keyFiles := []string{"test_server.key", "test_client.key", "test_ecdsa_server.key"}
 	os.WriteFile("test_server.key", privServer, 0600)
 	os.WriteFile("test_client.key", privClient, 0600)
+	os.WriteFile("test_ecdsa_server.key", ecdsaKey, 0600)
 
 	phases := []struct {
 		title string
@@ -216,7 +221,7 @@ listen_addr = ":8085"
 [security]
 enable_socks5 = true
 enable_udp = true
-private_key = "test_server.key"
+private_key = "test_ecdsa_server.key"
 `,
 				ClientConf: `
 remote_addr = "127.0.0.1:8085"
