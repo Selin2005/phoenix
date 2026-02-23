@@ -4,6 +4,20 @@ This page provides a summary of all Phoenix versions and the changes in each rel
 
 ---
 
+## v1.0.1 — Shadowsocks AEAD & TLS Fingerprint Spoofing 🚀
+
+In this version, numerous security improvements have been introduced to fight against Deep Packet Inspection (DPI) and fully support third-party local proxying.
+
+- **[New]** Added **Browser Fingerprint Spoofing** (`fingerprint`) (Chrome, Firefox, Safari, Random) using `utls` to deceive DPI systems.
+- **[New]** Introduced a standalone **Insecure TLS** mode (`tls_mode = "insecure"`) designed for direct connections to servers using Self-signed certs without needing a CDN.
+- **[New]** Flawless native Shadowsocks implementation. Phoenix can now act as a local Shadowsocks proxy on your client using secure AEAD ciphers (`aes-256-gcm`, `aes-128-gcm`, `chacha20-ietf-poly1305`).
+- **[New]** Added the `-get-ss` utility flag to instantly grab a complete `ss://` connection link directly from the client.
+- **[Improvement]** Added ECDSA P256 key support on the server to mitigate Chrome's lack of support for Ed25519 in TLS certificates.
+- **[Improvement]** Complete revamp of startup security logs for clarity regarding token status, core protocol, and Fingerprint modes.
+- **[Docs]** Website landing page modernized using Glassmorphism design alongside massive updates to troubleshooting scenarios and logs explanation.
+
+---
+
 ## v1.0.1dev2 — TLS Fingerprint Spoofing & Insecure TLS
 
 - **[New]** Added **Browser Fingerprint Spoofing** (`fingerprint`) using the `utls` library — to bypass DPI systems blocking non-browser traffic
