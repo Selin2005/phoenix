@@ -55,7 +55,18 @@ func NewClient(cfg *config.ClientConfig) *Client {
 
 // dialWithFingerprint dials a TLS connection using uTLS to spoof a browser fingerprint.
 // If fingerprint is empty, falls back to standard Go TLS.
+// Always negotiates HTTP/2 (ALPN "h2") regardless of fingerprint mode.
 func dialWithFingerprint(network, addr string, tlsCfg *tls.Config, fingerprint string) (net.Conn, error) {
+	// Ensure ALPN h2 is set (http2.Transport normally does this, but custom DialTLS bypasses it)
+	if tlsCfg == nil {
+		tlsCfg = &tls.Config{}
+	}
+	if len(tlsCfg.NextProtos) == 0 {
+		cloned := tlsCfg.Clone()
+		cloned.NextProtos = []string{"h2"}
+		tlsCfg = cloned
+	}
+
 	if fingerprint == "" {
 		// Standard TLS — no spoofing
 		return tls.Dial(network, addr, tlsCfg)
@@ -71,9 +82,10 @@ func dialWithFingerprint(network, addr string, tlsCfg *tls.Config, fingerprint s
 
 	utlsCfg := &utls.Config{
 		ServerName:         host,
-		InsecureSkipVerify: tlsCfg != nil && tlsCfg.InsecureSkipVerify, //nolint:gosec
+		InsecureSkipVerify: tlsCfg.InsecureSkipVerify, //nolint:gosec
+		NextProtos:         tlsCfg.NextProtos,
 	}
-	if tlsCfg != nil && tlsCfg.RootCAs != nil {
+	if tlsCfg.RootCAs != nil {
 		utlsCfg.RootCAs = tlsCfg.RootCAs
 	}
 
@@ -84,7 +96,7 @@ func dialWithFingerprint(network, addr string, tlsCfg *tls.Config, fingerprint s
 	}
 
 	// If caller provided custom VerifyPeerCertificate, run it now
-	if tlsCfg != nil && tlsCfg.VerifyPeerCertificate != nil {
+	if tlsCfg.VerifyPeerCertificate != nil {
 		state := uConn.ConnectionState()
 		rawCerts := make([][]byte, len(state.PeerCertificates))
 		for i, c := range state.PeerCertificates {
