@@ -9,13 +9,14 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
+	"math/rand"
 	"net"
 	"net/http"
 	"phoenix/pkg/config"
 	"phoenix/pkg/crypto"
 	"phoenix/pkg/protocol"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	utls "github.com/refraction-networking/utls"
@@ -26,10 +27,10 @@ import (
 type Client struct {
 	Config       *config.ClientConfig
 	httpClient   *http.Client // Internal HTTP client (protected by mu)
-	Scheme       string
-	failureCount uint32       // Atomic counter
-	mu           sync.RWMutex // Protects httpClient
-	lastReset    time.Time    // Timestamp of last reset (for debounce)
+	Scheme          string
+	errorTimestamps []time.Time  // Tracks error times within the error window
+	resetAttempts   int          // Tracks consecutive resets for exponential backoff
+	mu              sync.RWMutex // Protects httpClient and recovery state
 }
 
 // NewClient creates a new Phoenix client instance.
@@ -298,7 +299,9 @@ func (c *Client) Dial(proto protocol.ProtocolType, target string) (io.ReadWriteC
 	select {
 	case resp := <-respChan:
 		// Connection Successful
-		atomic.StoreUint32(&c.failureCount, 0) // Reset failure count
+		c.mu.Lock()
+		c.resetAttempts = 0
+		c.mu.Unlock()
 
 		if resp.StatusCode != http.StatusOK {
 			resp.Body.Close()
@@ -321,46 +324,80 @@ func (c *Client) Dial(proto protocol.ProtocolType, target string) (io.ReadWriteC
 	}
 }
 
-// handleConnectionFailure increments failure count and triggers Hard Reset if needed.
-func (c *Client) handleConnectionFailure(err error) {
-	newCount := atomic.AddUint32(&c.failureCount, 1)
-	log.Printf("Connection Error (%d/3): %v", newCount, err)
+// calculateJitterBackoff computes the delay using AWS full jitter formula.
+func (c *Client) calculateJitterBackoff() time.Duration {
+	base := float64(c.Config.Recovery.BackoffBaseMs)
+	capMs := float64(c.Config.Recovery.BackoffCapMs)
+	
+	maxSleepMs := base * math.Pow(2, float64(c.resetAttempts))
+	if maxSleepMs > capMs {
+		maxSleepMs = capMs
+	}
+	
+	if !c.Config.Recovery.BackoffJitter {
+		return time.Duration(maxSleepMs) * time.Millisecond
+	}
+	
+	sleepMs := rand.Float64() * maxSleepMs
+	return time.Duration(sleepMs) * time.Millisecond
+}
 
-	if newCount >= 3 {
+// handleConnectionFailure tracks error windows and triggers Hard Reset if needed.
+func (c *Client) handleConnectionFailure(err error) {
+	if !c.Config.Recovery.Enabled {
+		log.Printf("Connection Error (Recovery disabled): %v", err)
+		return
+	}
+
+	c.mu.Lock()
+	now := time.Now()
+	var recentErrors []time.Time
+	windowStart := now.Add(-time.Duration(c.Config.Recovery.ErrorWindowS) * time.Second)
+	
+	for _, t := range c.errorTimestamps {
+		if t.After(windowStart) {
+			recentErrors = append(recentErrors, t)
+		}
+	}
+	recentErrors = append(recentErrors, now)
+	c.errorTimestamps = recentErrors
+	errCount := len(recentErrors)
+	
+	triggerReset := errCount >= c.Config.Recovery.ErrorThreshold
+	if triggerReset {
+		c.errorTimestamps = nil // Clear so we don't trigger again immediately
+	}
+	c.mu.Unlock()
+
+	log.Printf("Connection Error (%d/%d in %ds window): %v", errCount, c.Config.Recovery.ErrorThreshold, c.Config.Recovery.ErrorWindowS, err)
+
+	if triggerReset {
 		c.resetClient()
 	}
 }
 
-// resetClient destroys the old HTTP connection and creates a fresh one.
+// resetClient destroys the old HTTP connection and creates a fresh one with backoff.
 func (c *Client) resetClient() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	// Debounce: Check if we reset recently (e.g. within 5 seconds)
-	if time.Since(c.lastReset) < 5*time.Second {
-		// Reset already happened recently. Just ensure failure count is low and return.
-		atomic.StoreUint32(&c.failureCount, 0)
-		return
-	}
+	c.resetAttempts++
+	backoffDelay := c.calculateJitterBackoff()
 
-	log.Println("WARNING: Network unstable. Destroying and recreating HTTP client (Hard Reset)...")
+	log.Printf("WARNING: Network unstable. Destroying HTTP client. Backoff %v before reconnect...", backoffDelay)
 
 	// Close old connections to free resources
 	if c.httpClient != nil {
 		c.httpClient.CloseIdleConnections()
 	}
 
+	// Backoff before dialing (holds the lock to freeze new Dial attempts)
+	time.Sleep(backoffDelay)
+
 	// Create new client
-	// Note: Creating new http.Client creates new Transport, which creates new TCP connection pool.
 	c.httpClient = c.createHTTPClient()
-
-	// Update timestamp and reset failure count
-	c.lastReset = time.Now()
-	atomic.StoreUint32(&c.failureCount, 0)
-
-	// Backoff
-	time.Sleep(1 * time.Second)
-	log.Println("Client re-initialized. Ready for new connections.")
+	
+	log.Printf("Client re-initialized (Attempt %d). Ready for new connections.", c.resetAttempts)
 }
 
 // Stream wraps the pipe endpoint to implement io.ReadWriteCloser.

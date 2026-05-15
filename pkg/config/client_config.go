@@ -24,6 +24,16 @@ type ClientInbound struct {
 	Auth string `toml:"auth,omitempty"`
 }
 
+// ClientRecovery defines settings for zombie connection detection and full-jitter backoff.
+type ClientRecovery struct {
+	Enabled        bool `toml:"enabled"`
+	ErrorThreshold int  `toml:"error_threshold"`
+	ErrorWindowS   int  `toml:"error_window_s"`
+	BackoffBaseMs  int  `toml:"backoff_base_ms"`
+	BackoffCapMs   int  `toml:"backoff_cap_ms"`
+	BackoffJitter  bool `toml:"backoff_jitter"`
+}
+
 // ClientConfig defines the full structure of the client configuration.
 // It allows for multiple simultaneous inbound listeners on different ports.
 type ClientConfig struct {
@@ -60,6 +70,9 @@ type ClientConfig struct {
 	// "safari"  → Mimic Safari
 	// "random"  → Random browser fingerprint per connection
 	Fingerprint string `toml:"fingerprint"`
+
+	// Recovery controls how the client handles zombie connections and disconnects.
+	Recovery ClientRecovery `toml:"recovery"`
 }
 
 // DefaultClientConfig returns a basic client configuration with a single SOCKS5 inbound.
@@ -71,6 +84,14 @@ func DefaultClientConfig() *ClientConfig {
 				Protocol:  protocol.ProtocolSOCKS5,
 				LocalAddr: "127.0.0.1:1080",
 			},
+		},
+		Recovery: ClientRecovery{
+			Enabled:        true,
+			ErrorThreshold: 10,
+			ErrorWindowS:   30,
+			BackoffBaseMs:  500,
+			BackoffCapMs:   15000,
+			BackoffJitter:  true,
 		},
 	}
 }
