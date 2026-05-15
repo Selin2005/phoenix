@@ -64,3 +64,42 @@ enable_shadowsocks = false
 
 # enable_ssh: Allow SSH tunneling.
 enable_ssh = false
+
+# ═══════════════════════════════════════════════════════════
+#  Outbound Relay (Optional)
+# ═══════════════════════════════════════════════════════════
+# The outbound block allows this server to act as a middle-man,
+# relaying traffic to another proxy server (SOCKS5 or Phoenix).
+
+# [outbound]
+# type: The protocol used for the next hop.
+# Available options: "direct" (default), "phoenix", "socks5"
+# type = "phoenix"
+
+# target: The address of the next proxy server (e.g. "192.168.1.5:443")
+# target = "127.0.0.1:4000"
+
+# ── Security settings for "phoenix" type outbound ──
+
+# tls_mode: Set to "secure" for standard TLS or "insecure" to skip cert verification.
+# tls_mode = "insecure"
+
+# fingerprint: Spoof client fingerprint (e.g., "chrome", "firefox", "safari").
+# fingerprint = "chrome"
+
+# auth_token: Password/token to authenticate with the next Phoenix server.
+# auth_token = "my-secret-token"
+
+# server_public_key: If the next server uses Ed25519 TLS, provide its public key here.
+# server_public_key = "..."
+
+# private_key: If the next server requires mTLS, provide the path to your client private key.
+# private_key = "client.key"
+
+# ── Settings for "socks5" type outbound ──
+
+# socks5_user: Username for authenticating with the upstream SOCKS5 proxy.
+# socks5_user = "admin"
+
+# socks5_pass: Password for authenticating with the upstream SOCKS5 proxy.
+# socks5_pass = "123456"
