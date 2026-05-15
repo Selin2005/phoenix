@@ -11,6 +11,8 @@ import (
 	"phoenix/pkg/protocol"
 	"phoenix/pkg/transport"
 	"time"
+
+	"github.com/txthinking/socks5"
 )
 
 func main() {
@@ -41,7 +43,7 @@ func main() {
 	cfg1c := config.DefaultClientConfig()
 	cfg1c.RemoteAddr = cfg1s.ListenAddr
 
-	results = append(results, runBenchmark("Direct h2c", cfg1s, cfg1c, echoAddr, sinkAddr, sourceAddr))
+	results = append(results, runBenchmark("Direct h2c", cfg1s, cfg1c, nil, echoAddr, sinkAddr, sourceAddr))
 
 	// ── Phase 2: h2c + Token ──────────────────────────────
 	printPhase("PHASE 2: h2c + Token Auth")
@@ -55,7 +57,7 @@ func main() {
 	cfg2c.RemoteAddr = cfg2s.ListenAddr
 	cfg2c.AuthToken = token
 
-	results = append(results, runBenchmark("h2c + Token", cfg2s, cfg2c, echoAddr, sinkAddr, sourceAddr))
+	results = append(results, runBenchmark("h2c + Token", cfg2s, cfg2c, nil, echoAddr, sinkAddr, sourceAddr))
 
 	// ── Phase 3: Insecure TLS + Token ─────────────────────
 	printPhase("PHASE 3: Insecure TLS + Token Auth")
@@ -71,7 +73,7 @@ func main() {
 	cfg3c.TLSMode = "insecure"
 	cfg3c.AuthToken = token
 
-	results = append(results, runBenchmark("Insecure TLS + Token", cfg3s, cfg3c, echoAddr, sinkAddr, sourceAddr))
+	results = append(results, runBenchmark("Insecure TLS + Token", cfg3s, cfg3c, nil, echoAddr, sinkAddr, sourceAddr))
 
 	// ── Phase 4: Insecure TLS + Chrome Fingerprint ────────
 	printPhase("PHASE 4: Insecure TLS + Chrome Fingerprint")
@@ -86,7 +88,51 @@ func main() {
 	cfg4c.TLSMode = "insecure"
 	cfg4c.Fingerprint = "chrome"
 
-	results = append(results, runBenchmark("Insecure TLS + Chrome", cfg4s, cfg4c, echoAddr, sinkAddr, sourceAddr))
+	results = append(results, runBenchmark("Insecure TLS + Chrome", cfg4s, cfg4c, nil, echoAddr, sinkAddr, sourceAddr))
+
+	// ── Phase 5: Phoenix Outbound Relay ───────────────────
+	printPhase("PHASE 5: Phoenix Outbound Relay")
+	cfg5t := config.DefaultServerConfig()
+	cfg5t.ListenAddr = findFreeAddr()
+	cfg5t.Security.EnableSOCKS5 = true
+	cfg5t.Security.EnableSSH = true
+
+	cfg5s := config.DefaultServerConfig()
+	cfg5s.ListenAddr = findFreeAddr()
+	cfg5s.Security.EnableSOCKS5 = true
+	cfg5s.Security.EnableSSH = true
+	cfg5s.Outbound = &config.Outbound{
+		Type:   "phoenix",
+		Target: cfg5t.ListenAddr,
+	}
+
+	cfg5c := config.DefaultClientConfig()
+	cfg5c.RemoteAddr = cfg5s.ListenAddr
+
+	results = append(results, runBenchmark("Phoenix Relay", cfg5s, cfg5c, cfg5t, echoAddr, sinkAddr, sourceAddr))
+
+	// ── Phase 6: SOCKS5 Outbound Relay ────────────────────
+	printPhase("PHASE 6: SOCKS5 Outbound Relay")
+	cfg6s := config.DefaultServerConfig()
+	cfg6s.ListenAddr = findFreeAddr()
+	cfg6s.Security.EnableSOCKS5 = true
+	cfg6s.Security.EnableSSH = true
+
+	socks5Addr := findFreeAddr()
+	cfg6s.Outbound = &config.Outbound{
+		Type:   "socks5",
+		Target: socks5Addr,
+	}
+
+	// Start local mock SOCKS5 proxy
+	s5, _ := socks5.NewClassicServer(socks5Addr, "127.0.0.1", "", "", 0, 0)
+	go s5.ListenAndServe(nil)
+	defer s5.Shutdown()
+
+	cfg6c := config.DefaultClientConfig()
+	cfg6c.RemoteAddr = cfg6s.ListenAddr
+
+	results = append(results, runBenchmark("SOCKS5 Relay", cfg6s, cfg6c, nil, echoAddr, sinkAddr, sourceAddr))
 
 	// ── Summary ───────────────────────────────────────────
 	fmt.Println("\n╔════════════════════════════════════════════════════════╗")
@@ -113,7 +159,16 @@ type benchResult struct {
 	latency     time.Duration
 }
 
-func runBenchmark(name string, serverCfg *config.ServerConfig, clientCfg *config.ClientConfig, echoAddr, sinkAddr, sourceAddr string) benchResult {
+func runBenchmark(name string, serverCfg *config.ServerConfig, clientCfg *config.ClientConfig, targetServerCfg *config.ServerConfig, echoAddr, sinkAddr, sourceAddr string) benchResult {
+	// Start target server if provided
+	if targetServerCfg != nil {
+		go func() {
+			if err := transport.StartServer(targetServerCfg); err != nil {
+				log.Printf("[%s] Target Server error: %v", name, err)
+			}
+		}()
+	}
+
 	// Start server
 	go func() {
 		if err := transport.StartServer(serverCfg); err != nil {
@@ -153,10 +208,29 @@ func runBenchmark(name string, serverCfg *config.ServerConfig, clientCfg *config
 	if err != nil {
 		log.Fatalf("[%s] Download Dial failed: %v", name, err)
 	}
-	received, _ := io.Copy(io.Discard, downStream)
+	received := 0
+	buf := make([]byte, 32*1024)
+	lastPrint := time.Now()
+	for received < dataSize {
+		n, err := downStream.Read(buf)
+		if n > 0 {
+			received += n
+		}
+		if time.Since(lastPrint) > 2*time.Second {
+			fmt.Printf("[%s] Downloaded %d bytes so far...\n", name, received)
+			lastPrint = time.Now()
+		}
+		if err != nil {
+			if err != io.EOF {
+				log.Printf("[%s] Download error: %v", name, err)
+			}
+			break
+		}
+	}
 	downDuration := time.Since(start)
 	downMBs := float64(received) / 1024 / 1024 / downDuration.Seconds()
 	fmt.Printf("[%s] Download Speed: %.2f MB/s\n", name, downMBs)
+	downStream.Close()
 
 	// Latency (RTT)
 	start = time.Now()
@@ -165,8 +239,8 @@ func runBenchmark(name string, serverCfg *config.ServerConfig, clientCfg *config
 		log.Fatalf("[%s] Latency Dial failed: %v", name, err)
 	}
 	pingStream.Write([]byte("ping"))
-	buf := make([]byte, 4)
-	pingStream.Read(buf)
+	pingBuf := make([]byte, 4)
+	pingStream.Read(pingBuf)
 	latency := time.Since(start)
 	fmt.Printf("[%s] Latency (RTT):  %v\n", name, latency)
 	pingStream.Close()

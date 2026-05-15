@@ -7,6 +7,18 @@ import (
 	"net"
 )
 
+// Dialer abstracts the connection creation for SSH tunnels.
+type Dialer interface {
+	Dial(network, addr string) (net.Conn, error)
+}
+
+// NetDialer implements Dialer using standard net.Dial.
+type NetDialer struct{}
+
+func (d *NetDialer) Dial(network, addr string) (net.Conn, error) {
+	return net.Dial(network, addr)
+}
+
 // HandleConnection receives an SSH connection from the client and proxies it to the target.
 // Note: Standard SSH connects to a specific server.
 // If the H2C stream contains an SSH handshake, we need to know WHERE to connect.
@@ -27,7 +39,7 @@ import (
 //
 // Let's modify the H2C protocol to include a Target header.
 // `X-Nerve-Target: host:port`
-func HandleConnection(rw io.ReadWriteCloser, target string) error {
+func HandleConnection(rw io.ReadWriteCloser, target string, dialer Dialer) error {
 	defer rw.Close()
 
 	if target == "" {
@@ -36,7 +48,7 @@ func HandleConnection(rw io.ReadWriteCloser, target string) error {
 	}
 
 	log.Printf("[SSH] Tunneling to %s", target)
-	destConn, err := net.Dial("tcp", target)
+	destConn, err := dialer.Dial("tcp", target)
 	if err != nil {
 		return fmt.Errorf("failed to dial SSH target %s: %v", target, err)
 	}

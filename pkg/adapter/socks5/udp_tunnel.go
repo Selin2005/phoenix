@@ -6,35 +6,42 @@ import (
 	"io"
 	"log"
 	"net"
+	"strings"
+	"sync"
 )
 
 // HandleUDPTunnel handles the server-side logic for a UDP tunnel stream.
 // It reads encapsulated UDP packets from the stream, sends them to the target,
 // and relays responses back.
-func HandleUDPTunnel(stream io.ReadWriteCloser) error {
+func HandleUDPTunnel(stream io.ReadWriteCloser, dialer Dialer) error {
 	defer stream.Close()
 
-	// 1. Create a local UDP socket for this session
-	udpConn, err := net.ListenPacket("udp", ":0")
-	if err != nil {
-		return fmt.Errorf("failed to bind udp socket: %v", err)
-	}
-	defer udpConn.Close()
-
-	// Increase socket buffers to handle bursts (e.g. YouTube QUIC)
-	if c, ok := udpConn.(*net.UDPConn); ok {
-		c.SetReadBuffer(4 * 1024 * 1024)
-		c.SetWriteBuffer(4 * 1024 * 1024)
-	}
+	// We use a map to keep track of active UDP connections per destination.
+	conns := make(map[string]net.Conn)
+	var mu sync.Mutex
+	defer func() {
+		mu.Lock()
+		for _, c := range conns {
+			c.Close()
+		}
+		mu.Unlock()
+	}()
 
 	// 2. Stream -> UDP Loop
 	errChan := make(chan error, 2)
+	
+	// Ensure synchronized writes to stream
+	var streamMu sync.Mutex
+
 	go func() {
 		header := make([]byte, 2)
 		for {
 			// Read Length
 			if _, err := io.ReadFull(stream, header); err != nil {
-				log.Printf("[SOCKS5-UDP-Server] Stream read error: %v", err)
+				errStr := err.Error()
+				if err != io.EOF && !strings.Contains(errStr, "CANCEL") && !strings.Contains(errStr, "client disconnected") {
+					log.Printf("[SOCKS5-UDP-Server] Stream read error: %v", err)
+				}
 				errChan <- err
 				return
 			}
@@ -51,7 +58,6 @@ func HandleUDPTunnel(stream io.ReadWriteCloser) error {
 			}
 
 			// Parse SOCKS5 UDP Header to extract Destination
-			// Format: [RSV][FRAG][ATYP][DST.ADDR][DST.PORT][DATA]
 			if len(pktBuf) < 10 { // Min header size (IPv4)
 				log.Printf("[SOCKS5-UDP] Packet too short")
 				continue
@@ -61,6 +67,7 @@ func HandleUDPTunnel(stream io.ReadWriteCloser) error {
 			atyp := pktBuf[3]
 			var destAddr string
 			var dataOffset int
+			var headerBytes []byte
 
 			switch atyp {
 			case 0x01: // IPv4
@@ -71,6 +78,8 @@ func HandleUDPTunnel(stream io.ReadWriteCloser) error {
 				port := binary.BigEndian.Uint16(pktBuf[8:10])
 				destAddr = fmt.Sprintf("%s:%d", ip, port)
 				dataOffset = 10
+				headerBytes = make([]byte, 10)
+				copy(headerBytes, pktBuf[:10])
 			case 0x03: // Domain
 				if len(pktBuf) < 5 {
 					continue
@@ -83,6 +92,8 @@ func HandleUDPTunnel(stream io.ReadWriteCloser) error {
 				port := binary.BigEndian.Uint16(pktBuf[5+domainLen : 5+domainLen+2])
 				destAddr = fmt.Sprintf("%s:%d", domain, port)
 				dataOffset = 5 + domainLen + 2
+				headerBytes = make([]byte, dataOffset)
+				copy(headerBytes, pktBuf[:dataOffset])
 			case 0x04: // IPv6
 				if len(pktBuf) < 22 {
 					continue
@@ -91,85 +102,84 @@ func HandleUDPTunnel(stream io.ReadWriteCloser) error {
 				port := binary.BigEndian.Uint16(pktBuf[20:22])
 				destAddr = fmt.Sprintf("[%s]:%d", ip, port)
 				dataOffset = 22
+				headerBytes = make([]byte, 22)
+				copy(headerBytes, pktBuf[:22])
 			default:
 				log.Printf("[SOCKS5-UDP] Unknown ATYP %d", atyp)
-				continue
-			}
-
-			// Resolve Address
-			uAddr, err := net.ResolveUDPAddr("udp", destAddr)
-			if err != nil {
-				log.Printf("[SOCKS5-UDP] Resolve error for %s: %v", destAddr, err)
 				continue
 			}
 
 			// Payload
 			payload := pktBuf[dataOffset:]
 
+			// Get or Create UDP Connection for this destination
+			mu.Lock()
+			conn, exists := conns[destAddr]
+			if !exists {
+				var err error
+				conn, err = dialer.Dial("udp", destAddr)
+				if err != nil {
+					log.Printf("[SOCKS5-UDP] Failed to dial %s: %v", destAddr, err)
+					mu.Unlock()
+					continue
+				}
+				conns[destAddr] = conn
+
+				// Start reader for this new connection
+				go func(c net.Conn, dAddr string, hdr []byte) {
+					buf := make([]byte, 65535)
+					for {
+						n, err := c.Read(buf)
+						if err != nil {
+							c.Close()
+							mu.Lock()
+							delete(conns, dAddr)
+							mu.Unlock()
+							return
+						}
+
+						// Construct SOCKS5 UDP Packet to send back
+						totalLen := len(hdr) + n
+						packet := make([]byte, 2+totalLen)
+						binary.BigEndian.PutUint16(packet, uint16(totalLen))
+						copy(packet[2:], hdr)
+						copy(packet[2+len(hdr):], buf[:n])
+
+						streamMu.Lock()
+						_, err = stream.Write(packet)
+						streamMu.Unlock()
+						if err != nil {
+							errStr := err.Error()
+							if !strings.Contains(errStr, "CANCEL") && !strings.Contains(errStr, "client disconnected") {
+								log.Printf("[SOCKS5-UDP-Server] Failed to write to stream: %v", err)
+							}
+							errChan <- err
+							return
+						}
+					}
+				}(conn, destAddr, headerBytes)
+			}
+			mu.Unlock()
+
 			// Write to Target
-			if _, err := udpConn.WriteTo(payload, uAddr); err != nil {
-				log.Printf("[SOCKS5-UDP] WriteTo error: %v", err)
-				// Don't kill stream on single packet error
+			if _, err := conn.Write(payload); err != nil {
+				log.Printf("[SOCKS5-UDP] Write error: %v", err)
+				// Close connection on error to force reconnect next time
+				conn.Close()
+				mu.Lock()
+				delete(conns, destAddr)
+				mu.Unlock()
 				continue
 			}
 		}
 	}()
 
-	// 3. UDP -> Stream Loop
-	go func() {
-		buf := make([]byte, 65535)
-		for {
-			n, peerAddr, err := udpConn.ReadFrom(buf)
-			if err != nil {
-				log.Printf("[SOCKS5-UDP-Server] ReadFrom UDP error: %v", err)
-				errChan <- err
-				return
-			}
-
-			// Construct SOCKS5 UDP Packet
-			// We need to encode peerAddr back into SOCKS5 headers.
-			// Format: [RSV=0][FRAG=0][ATYP][ADDR][PORT][DATA]
-			//
-			// peerAddr is net.Addr. usually *net.UDPAddr.
-			udpAddr, ok := peerAddr.(*net.UDPAddr)
-			if !ok {
-				continue
-			}
-
-			ip := udpAddr.IP
-			port := udpAddr.Port
-
-			var header []byte
-			if ip4 := ip.To4(); ip4 != nil {
-				header = make([]byte, 10)
-				header[3] = 0x01 // IPv4
-				copy(header[4:], ip4)
-				binary.BigEndian.PutUint16(header[8:], uint16(port))
-			} else {
-				header = make([]byte, 22) // IPv6
-				header[3] = 0x04
-				copy(header[4:], ip)
-				binary.BigEndian.PutUint16(header[20:], uint16(port))
-			}
-
-			// Pkt = Header + Data
-			totalLen := len(header) + n
-
-			// Write Stream: [Len][Header][Data] in single write for atomicity
-			packet := make([]byte, 2+len(header)+n)
-			binary.BigEndian.PutUint16(packet, uint16(totalLen))
-			copy(packet[2:], header)
-			copy(packet[2+len(header):], buf[:n])
-
-			if _, err := stream.Write(packet); err != nil {
-				log.Printf("[SOCKS5-UDP-Server] Failed to write to stream: %v", err)
-				errChan <- err
-				return
-			}
+	err := <-errChan
+	if err != nil && err != io.EOF {
+		errStr := err.Error()
+		if !strings.Contains(errStr, "CANCEL") && !strings.Contains(errStr, "client disconnected") && !strings.Contains(errStr, "connection reset by peer") {
+			log.Printf("[SOCKS5-UDP-Server] Closing session due to: %v", err)
 		}
-	}()
-
-	err = <-errChan
-	log.Printf("[SOCKS5-UDP-Server] Closing session due to: %v", err)
+	}
 	return err
 }

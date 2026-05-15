@@ -15,8 +15,10 @@ import (
 	"phoenix/pkg/crypto"
 	"phoenix/pkg/protocol"
 	"phoenix/pkg/transport"
+	"strings"
 	"sync"
 	"syscall"
+	"time"
 )
 
 // PhoenixTunnelDialer implements socks5.Dialer by tunneling h2c
@@ -25,14 +27,29 @@ type PhoenixTunnelDialer struct {
 	Proto  protocol.ProtocolType
 }
 
-func (d *PhoenixTunnelDialer) Dial(target string) (io.ReadWriteCloser, error) {
+func (d *PhoenixTunnelDialer) Dial(network, target string) (net.Conn, error) {
 	proto := d.Proto
 	if target == "udp-tunnel" {
 		proto = protocol.ProtocolSOCKS5UDP
 		target = ""
 	}
-	return d.Client.Dial(proto, target)
+	stream, err := d.Client.Dial(proto, target)
+	if err != nil {
+		return nil, err
+	}
+	return &streamConnWrapper{stream}, nil
 }
+
+// streamConnWrapper wraps an io.ReadWriteCloser to implement net.Conn
+type streamConnWrapper struct {
+	io.ReadWriteCloser
+}
+
+func (s *streamConnWrapper) LocalAddr() net.Addr                { return &net.TCPAddr{} }
+func (s *streamConnWrapper) RemoteAddr() net.Addr               { return &net.TCPAddr{} }
+func (s *streamConnWrapper) SetDeadline(t time.Time) error      { return nil }
+func (s *streamConnWrapper) SetReadDeadline(t time.Time) error  { return nil }
+func (s *streamConnWrapper) SetWriteDeadline(t time.Time) error { return nil }
 
 // ShadowsocksDialer implements shadowsocks.Dialer by tunneling through Phoenix server.
 // Since SS decryption happens on the client, we send the extracted target to the server
@@ -41,8 +58,12 @@ type ShadowsocksDialer struct {
 	Client *transport.Client
 }
 
-func (d *ShadowsocksDialer) Dial(target string) (io.ReadWriteCloser, error) {
-	return d.Client.Dial(protocol.ProtocolShadowsocks, target)
+func (d *ShadowsocksDialer) Dial(network, target string) (net.Conn, error) {
+	stream, err := d.Client.Dial(protocol.ProtocolShadowsocks, target)
+	if err != nil {
+		return nil, err
+	}
+	return &streamConnWrapper{stream}, nil
 }
 
 func main() {
@@ -178,7 +199,10 @@ func handleConnection(client *transport.Client, in config.ClientInbound, conn ne
 		}
 		// Wrap conn to io.ReadWriteCloser to satisfy interface
 		if err := socks5.HandleConnection(conn, dialer, in.EnableUDP); err != nil {
-			log.Printf("SOCKS5 Handler Error: %v", err)
+			errStr := err.Error()
+			if err != io.EOF && !strings.Contains(errStr, "connection reset") && !strings.Contains(errStr, "tcp control connection closed: EOF") {
+				log.Printf("SOCKS5 Handler Error: %v", err)
+			}
 		}
 
 	case protocol.ProtocolSSH:

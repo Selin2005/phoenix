@@ -9,14 +9,14 @@ import (
 
 // Dialer abstracts the connection creation.
 type Dialer interface {
-	Dial(target string) (io.ReadWriteCloser, error)
+	Dial(network, addr string) (net.Conn, error)
 }
 
 // NetDialer implements Dialer using standard net.Dial
 type NetDialer struct{}
 
-func (d *NetDialer) Dial(target string) (io.ReadWriteCloser, error) {
-	return net.Dial("tcp", target)
+func (d *NetDialer) Dial(network, addr string) (net.Conn, error) {
+	return net.Dial(network, addr)
 }
 
 // HandleConnection performs the SOCKS5 handshake.
@@ -113,7 +113,7 @@ func HandleConnection(conn io.ReadWriteCloser, dialer Dialer, enableUDP bool) er
 	target := fmt.Sprintf("%s:%d", targetAddr, port)
 
 	// 3. Connect via Dialer
-	destConn, err := dialer.Dial(target)
+	destConn, err := dialer.Dial("tcp", target)
 	if err != nil {
 		// Error reply
 		conn.Write([]byte{0x05, 0x05, 0x00, 0x01, 0, 0, 0, 0, 0, 0})

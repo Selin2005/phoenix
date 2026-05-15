@@ -13,7 +13,7 @@ import (
 
 // Dialer abstracts connection creation to the Phoenix server tunnel.
 type Dialer interface {
-	Dial(target string) (io.ReadWriteCloser, error)
+	Dial(network, target string) (net.Conn, error)
 }
 
 // ListenAndServe starts a Shadowsocks server on the given address.
@@ -66,7 +66,7 @@ func handleConn(conn net.Conn, dialer Dialer) {
 	log.Printf("[Shadowsocks] Connecting to %s", target)
 
 	// 2. Dial Phoenix server with the target
-	stream, err := dialer.Dial(target)
+	stream, err := dialer.Dial("tcp", target)
 	if err != nil {
 		log.Printf("[Shadowsocks] Failed to dial %s: %v", target, err)
 		return

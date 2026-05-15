@@ -44,6 +44,22 @@ type ServerConfig struct {
 
 	// Security defines the protocol access controls.
 	Security ServerSecurity `toml:"security"`
+
+	// Outbound defines the relay/intermediary configuration (optional).
+	Outbound *Outbound `toml:"outbound"`
+}
+
+// Outbound defines the relay/intermediary configuration.
+type Outbound struct {
+	Type            string `toml:"type"` // "direct" (default), "phoenix", "socks5"
+	Target          string `toml:"target"`
+	TLSMode         string `toml:"tls_mode"`
+	Fingerprint     string `toml:"fingerprint"`
+	AuthToken       string `toml:"auth_token"`
+	ServerPublicKey string `toml:"server_public_key"`
+	PrivateKeyPath  string `toml:"private_key"`
+	SOCKS5User      string `toml:"socks5_user"`
+	SOCKS5Pass      string `toml:"socks5_pass"`
 }
 
 // DefaultServerConfig returns a server configuration with safe defaults.

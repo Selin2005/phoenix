@@ -60,7 +60,7 @@ func HandleUDP(conn io.ReadWriteCloser, dialer Dialer) error {
 
 	// Create a tunnel stream to Server for UDP traffic
 	// We initiate ONE stream for this association.
-	stream, err := dialer.Dial("udp-tunnel")
+	stream, err := dialer.Dial("tcp", "udp-tunnel")
 	if err != nil {
 		return fmt.Errorf("failed to dial UDP tunnel: %v", err)
 	}

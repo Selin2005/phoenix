@@ -15,16 +15,19 @@ import (
 
 	"phoenix/pkg/crypto"
 
+	"github.com/txthinking/socks5"
 	"golang.org/x/net/proxy"
 )
 
 // suiteConfig holds the parameters for a single test suite run.
 type suiteConfig struct {
 	Name           string
-	ServerConfFile string
+	ServerConfFile string // Relay Server
 	ClientConfFile string
+	TargetConfFile string // Target Server (optional)
 	ServerConf     string
 	ClientConf     string
+	TargetConf     string
 	SOCKS5Addr     string
 	EchoTCPAddr    string
 	EchoUDPPort    uint16
@@ -80,8 +83,8 @@ func runAllPhases() {
 	}()
 
 	// Allocate all ports upfront (dynamic, avoids conflicts from previous runs)
-	serverPorts := make([]string, 6)
-	clientPorts := make([]string, 6)
+	serverPorts := make([]string, 8)
+	clientPorts := make([]string, 8)
 	for i := range serverPorts {
 		serverPorts[i] = findFreePort()
 		clientPorts[i] = findFreePort()
@@ -250,6 +253,68 @@ enable_udp = true
 				EchoUDPPort: 9002,
 			},
 		},
+		{
+			"PHASE 7: Phoenix Outbound Relay",
+			suiteConfig{
+				Name:           "PhoenixRelay",
+				ServerConfFile: "test_server_relay_p.toml", // Relay
+				TargetConfFile: "test_target_server_p.toml", // Target
+				ClientConfFile: "test_client_relay_p.toml",
+				ServerConf: fmt.Sprintf(`
+listen_addr = ":%s"
+[security]
+enable_socks5 = true
+enable_udp = true
+[outbound]
+type = "phoenix"
+target = "127.0.0.1:%s"
+`, serverPorts[6], clientPorts[7]), // Relay listens on serverPorts[6], forwards to clientPorts[7] (Target)
+				TargetConf: fmt.Sprintf(`
+listen_addr = ":%s"
+[security]
+enable_socks5 = true
+enable_udp = true
+`, clientPorts[7]), // Target Server
+				ClientConf: fmt.Sprintf(`
+remote_addr = "127.0.0.1:%s"
+[[inbounds]]
+protocol = "socks5"
+local_addr = "127.0.0.1:%s"
+enable_udp = true
+`, serverPorts[6], clientPorts[6]),
+				SOCKS5Addr:  "127.0.0.1:" + clientPorts[6],
+				EchoTCPAddr: "127.0.0.1:9001",
+				EchoUDPPort: 9002,
+			},
+		},
+		{
+			"PHASE 8: SOCKS5 Outbound Relay",
+			suiteConfig{
+				Name:           "Socks5Relay",
+				ServerConfFile: "test_server_relay_s.toml", // Relay
+				ClientConfFile: "test_client_relay_s.toml",
+				// Target SOCKS5 will be started locally on clientPorts[7]
+				ServerConf: fmt.Sprintf(`
+listen_addr = ":%s"
+[security]
+enable_socks5 = true
+enable_udp = true
+[outbound]
+type = "socks5"
+target = "127.0.0.1:%s"
+`, serverPorts[7], clientPorts[7]), // Relay listens on serverPorts[7], forwards to socks5 on clientPorts[7]
+				ClientConf: fmt.Sprintf(`
+remote_addr = "127.0.0.1:%s"
+[[inbounds]]
+protocol = "socks5"
+local_addr = "127.0.0.1:%s"
+enable_udp = true
+`, serverPorts[7], clientPorts[6]),
+				SOCKS5Addr:  "127.0.0.1:" + clientPorts[6],
+				EchoTCPAddr: "127.0.0.1:9001",
+				EchoUDPPort: 9002,
+			},
+		},
 	}
 
 	passed := 0
@@ -262,6 +327,9 @@ enable_udp = true
 		// Cleanup temp config files
 		os.Remove(p.cfg.ServerConfFile)
 		os.Remove(p.cfg.ClientConfFile)
+		if p.cfg.TargetConfFile != "" {
+			os.Remove(p.cfg.TargetConfFile)
+		}
 	}
 
 	fmt.Printf("\n====================================\n")
@@ -384,6 +452,9 @@ func runInteractive() {
 
 	os.Remove(cfg.ServerConfFile)
 	os.Remove(cfg.ClientConfFile)
+	if cfg.TargetConfFile != "" {
+		os.Remove(cfg.TargetConfFile)
+	}
 
 	fmt.Printf("\n====================================\n")
 	fmt.Printf("  Manual Test PASSED ✓\n")
@@ -511,6 +582,19 @@ func runSuiteSelective(cfg suiteConfig, testChoice string) {
 	}
 	defer func() { serverCmd.Process.Kill(); serverCmd.Wait() }()
 
+	var targetCmd *exec.Cmd
+	if cfg.TargetConf != "" {
+		os.WriteFile(cfg.TargetConfFile, []byte(cfg.TargetConf), 0644)
+		log.Printf("[%s] Starting Target Server...", cfg.Name)
+		targetCmd = exec.Command("./bin/server", "--config", cfg.TargetConfFile)
+		targetCmd.Stdout = os.Stdout
+		targetCmd.Stderr = os.Stderr
+		if err := targetCmd.Start(); err != nil {
+			log.Fatalf("[%s] Failed to start target server: %v", cfg.Name, err)
+		}
+		defer func() { targetCmd.Process.Kill(); targetCmd.Wait() }()
+	}
+
 	log.Printf("[%s] Starting Client...", cfg.Name)
 	clientCmd := exec.Command("./bin/client", "--config", cfg.ClientConfFile)
 	clientCmd.Stdout = os.Stdout
@@ -562,6 +646,19 @@ func runSuite(cfg suiteConfig) {
 	}
 	defer func() { serverCmd.Process.Kill(); serverCmd.Wait() }()
 
+	var targetCmd *exec.Cmd
+	if cfg.TargetConf != "" {
+		os.WriteFile(cfg.TargetConfFile, []byte(cfg.TargetConf), 0644)
+		log.Printf("[%s] Starting Phoenix Target Server...", cfg.Name)
+		targetCmd = exec.Command("./bin/server", "--config", cfg.TargetConfFile)
+		targetCmd.Stdout = os.Stdout
+		targetCmd.Stderr = os.Stderr
+		if err := targetCmd.Start(); err != nil {
+			log.Fatalf("[%s] Failed to start target server: %v", cfg.Name, err)
+		}
+		defer func() { targetCmd.Process.Kill(); targetCmd.Wait() }()
+	}
+
 	log.Printf("[%s] Starting Phoenix Client...", cfg.Name)
 	clientCmd := exec.Command("./bin/client", "--config", cfg.ClientConfFile)
 	clientCmd.Stdout = os.Stdout
@@ -570,6 +667,21 @@ func runSuite(cfg suiteConfig) {
 		log.Fatalf("[%s] Failed to start client: %v", cfg.Name, err)
 	}
 	defer func() { clientCmd.Process.Kill(); clientCmd.Wait() }()
+
+	var socks5Server *socks5.Server
+	if cfg.Name == "Socks5Relay" {
+		targetAddr := cfg.ServerConf[strings.Index(cfg.ServerConf, `target = "`)+10:]
+		targetAddr = targetAddr[:strings.Index(targetAddr, `"`)]
+		
+		var err error
+		socks5Server, err = socks5.NewClassicServer(targetAddr, "127.0.0.1", "", "", 0, 0)
+		if err != nil {
+			log.Fatalf("[%s] Failed to start mock SOCKS5 proxy: %v", cfg.Name, err)
+		}
+		go socks5Server.ListenAndServe(nil)
+		defer socks5Server.Shutdown()
+		log.Printf("[%s] Started Mock SOCKS5 Proxy on %s", cfg.Name, targetAddr)
+	}
 
 	time.Sleep(2 * time.Second)
 

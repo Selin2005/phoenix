@@ -11,6 +11,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"strings"
 	"phoenix/pkg/adapter/socks5"
 	"phoenix/pkg/adapter/ssh"
 	"phoenix/pkg/config"
@@ -20,16 +21,42 @@ import (
 
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
+
+	txsocks5 "github.com/txthinking/socks5"
 )
 
 // Server handles incoming H2C connections and routes them to the appropriate protocol handler.
 type Server struct {
-	Config *config.ServerConfig
+	Config                *config.ServerConfig
+	outboundPhoenixClient *Client
+	socks5ProxyClient     *txsocks5.Client
 }
 
 // NewServer creates a new H2C server instance.
-func NewServer(cfg *config.ServerConfig) *Server {
-	return &Server{Config: cfg}
+func NewServer(cfg *config.ServerConfig) (*Server, error) {
+	s := &Server{Config: cfg}
+
+	if cfg.Outbound != nil {
+		if cfg.Outbound.Type == "phoenix" {
+			clientCfg := &config.ClientConfig{
+				RemoteAddr:      cfg.Outbound.Target,
+				TLSMode:         cfg.Outbound.TLSMode,
+				Fingerprint:     cfg.Outbound.Fingerprint,
+				AuthToken:       cfg.Outbound.AuthToken,
+				ServerPublicKey: cfg.Outbound.ServerPublicKey,
+				PrivateKeyPath:  cfg.Outbound.PrivateKeyPath,
+			}
+			s.outboundPhoenixClient = NewClient(clientCfg)
+		} else if cfg.Outbound.Type == "socks5" {
+			c, err := txsocks5.NewClient(cfg.Outbound.Target, cfg.Outbound.SOCKS5User, cfg.Outbound.SOCKS5Pass, 0, 0)
+			if err != nil {
+				return nil, fmt.Errorf("failed to init socks5 outbound: %v", err)
+			}
+			s.socks5ProxyClient = c
+		}
+	}
+
+	return s, nil
 }
 
 // ServeHTTP implements the http.Handler interface.
@@ -94,23 +121,57 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Flusher: flusher,
 	}
 
+	// If phoenix outbound is configured, intercept everything!
+	if s.Config.Outbound != nil && s.Config.Outbound.Type == "phoenix" {
+		outboundStream, err := s.outboundPhoenixClient.Dial(protocol.ProtocolType(proto), target)
+		if err != nil {
+			log.Printf("Outbound Phoenix Dial failed: %v", err)
+			http.Error(w, "Bad Gateway", http.StatusBadGateway)
+			return
+		}
+		defer outboundStream.Close()
+
+		errChan := make(chan error, 2)
+		go func() {
+			_, err := io.Copy(outboundStream, stream)
+			errChan <- err
+		}()
+		go func() {
+			_, err := io.Copy(stream, outboundStream)
+			errChan <- err
+		}()
+		<-errChan
+		return
+	}
+
+	var dialer socks5.Dialer = &socks5.NetDialer{}
+	var sshDialer ssh.Dialer = &ssh.NetDialer{}
+
+	if s.Config.Outbound != nil && s.Config.Outbound.Type == "socks5" {
+		// Use txsocks5 Client as Dialer
+		// Wait, txsocks5.Client has Dial(network, addr string) (net.Conn, error)
+		// We can just use it directly!
+		dialer = s.socks5ProxyClient
+		sshDialer = s.socks5ProxyClient
+	}
+
 	var err error
 	// If target is provided in header, we assume the handshake is already done (e.g. at client side)
 	// and we just need to tunnel to the target.
 	if target != "" {
-		err = ssh.HandleConnection(stream, target)
+		err = ssh.HandleConnection(stream, target, sshDialer)
 	} else {
 		switch protocol.ProtocolType(proto) {
 		case protocol.ProtocolSOCKS5:
 			// Server handles SOCKS5 handshake
-			err = socks5.HandleConnection(stream, &socks5.NetDialer{}, s.Config.Security.EnableUDP)
+			err = socks5.HandleConnection(stream, dialer, s.Config.Security.EnableUDP)
 		case protocol.ProtocolSOCKS5UDP:
 			// Server handles SOCKS5 UDP Tunnel
 			if !s.Config.Security.EnableUDP {
 				http.Error(w, "UDP Disabled", http.StatusForbidden)
 				return
 			}
-			err = socks5.HandleUDPTunnel(stream)
+			err = socks5.HandleUDPTunnel(stream, dialer) // We'll update this next if needed
 		case protocol.ProtocolShadowsocks:
 			// SS is decrypted on client side; server gets target in header.
 			// If no target, we can't do anything.
@@ -120,15 +181,28 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			// or we implement SSH handshake parsing.
 			// Revert to default handling or error?
 			// For now, assume SSH forwarding always comes with target or Client is "Smart".
-			err = ssh.HandleConnection(stream, "")
+			err = ssh.HandleConnection(stream, "", sshDialer)
 		default:
 			_, err = io.Copy(stream, stream)
 		}
 	}
 
 	if err != nil && err != io.EOF {
-		log.Printf("Stream error: %v", err)
+		errStr := err.Error()
+		if !containsExpectedTeardownError(errStr) {
+			log.Printf("Stream error: %v", err)
+		}
 	}
+}
+
+func containsExpectedTeardownError(errStr string) bool {
+	if errStr == "" {
+		return false
+	}
+	return strings.Contains(errStr, "CANCEL") || 
+		strings.Contains(errStr, "connection reset") || 
+		strings.Contains(errStr, "client disconnected") ||
+		strings.Contains(errStr, "EOF")
 }
 
 // H2Stream adapts request/response to ReadWriteCloser
@@ -174,7 +248,10 @@ func logServerSecurityMode(cfg *config.ServerConfig) {
 
 // StartServer starts the H2C/H2 Server.
 func StartServer(cfg *config.ServerConfig) error {
-	srv := NewServer(cfg)
+	srv, err := NewServer(cfg)
+	if err != nil {
+		return err
+	}
 
 	// Log security status
 	logServerSecurityMode(cfg)
