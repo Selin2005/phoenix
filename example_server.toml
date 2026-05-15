@@ -84,8 +84,14 @@ enable_ssh = false
 # tls_mode: Set to "secure" for standard TLS or "insecure" to skip cert verification.
 # tls_mode = "insecure"
 
-# fingerprint: Spoof client fingerprint (e.g., "chrome", "firefox", "safari").
-# fingerprint = "chrome"
+# fingerprint: Spoof client fingerprint to bypass DPI filtering.
+#   "chrome"         → Chrome Auto
+#   "random_chrome"  → Rotates between Chrome versions per connection
+#   "chrome_dynamic" → Chrome with dynamic RFC 8701 GREASE randomization
+#   "firefox"        → Firefox Auto
+#   "safari"         → Safari Auto
+#   "random"         → Random browser fingerprint per connection
+# fingerprint = "chrome_dynamic"
 
 # auth_token: Password/token to authenticate with the next Phoenix server.
 # auth_token = "my-secret-token"

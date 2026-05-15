@@ -91,6 +91,25 @@ func dialWithFingerprint(network, addr string, tlsCfg *tls.Config, fingerprint s
 	}
 
 	uConn := utls.UClient(rawConn, utlsCfg, pickHelloID(fingerprint))
+
+	if fingerprint == "chrome_dynamic" {
+		// RFC 8701 GREASE randomization
+		if err := uConn.BuildHandshakeState(); err != nil {
+			rawConn.Close()
+			return nil, fmt.Errorf("failed to build handshake state: %v", err)
+		}
+		
+		for _, ext := range uConn.Extensions {
+			if greaseExt, ok := ext.(*utls.UtlsGREASEExtension); ok {
+				greaseValues := []uint16{
+					0x0A0A, 0x1A1A, 0x2A2A, 0x3A3A, 0x4A4A, 0x5A5A, 0x6A6A, 0x7A7A,
+					0x8A8A, 0x9A9A, 0xAAAA, 0xBABA, 0xCACA, 0xDADA, 0xEAEA, 0xFAFA,
+				}
+				greaseExt.Value = greaseValues[rand.Intn(len(greaseValues))]
+			}
+		}
+	}
+
 	if err := uConn.Handshake(); err != nil {
 		rawConn.Close()
 		return nil, fmt.Errorf("utls handshake failed: %v", err)
@@ -121,6 +140,15 @@ func pickHelloID(fp string) utls.ClientHelloID {
 		return utls.HelloSafari_Auto
 	case "random":
 		return utls.HelloRandomized
+	case "random_chrome":
+		chromeVersions := []utls.ClientHelloID{
+			utls.HelloChrome_133,
+			utls.HelloChrome_131,
+			utls.HelloChrome_120,
+		}
+		return chromeVersions[rand.Intn(len(chromeVersions))]
+	case "chrome_dynamic":
+		return utls.HelloChrome_Auto
 	default: // "chrome" or anything else
 		return utls.HelloChrome_Auto
 	}

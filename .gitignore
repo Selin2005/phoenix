@@ -7,3 +7,4 @@ bin/
 node_modules
 .vitepress/cache/
 *.keytest_*.toml
+*.key
