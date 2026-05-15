@@ -57,16 +57,29 @@ func NewClient(cfg *config.ClientConfig) *Client {
 // dialWithFingerprint dials a TLS connection using uTLS to spoof a browser fingerprint.
 // If fingerprint is empty, falls back to standard Go TLS.
 // Always negotiates HTTP/2 (ALPN "h2") regardless of fingerprint mode.
-func dialWithFingerprint(network, addr string, tlsCfg *tls.Config, fingerprint string) (net.Conn, error) {
+func dialWithFingerprint(network, addr string, tlsCfg *tls.Config, fingerprint string, customSNI string) (net.Conn, error) {
 	// Ensure ALPN h2 is set (http2.Transport normally does this, but custom DialTLS bypasses it)
 	if tlsCfg == nil {
 		tlsCfg = &tls.Config{}
+	} else {
+		tlsCfg = tlsCfg.Clone()
 	}
+
 	if len(tlsCfg.NextProtos) == 0 {
-		cloned := tlsCfg.Clone()
-		cloned.NextProtos = []string{"h2"}
-		tlsCfg = cloned
+		tlsCfg.NextProtos = []string{"h2"}
 	}
+
+	// Extract host for SNI
+	host, _, _ := net.SplitHostPort(addr)
+	if host == "" {
+		host = addr
+	}
+
+	// Override SNI if customSNI is provided
+	if customSNI != "" {
+		host = customSNI
+	}
+	tlsCfg.ServerName = host
 
 	if fingerprint == "" {
 		// Standard TLS — no spoofing
@@ -77,9 +90,6 @@ func dialWithFingerprint(network, addr string, tlsCfg *tls.Config, fingerprint s
 	if err != nil {
 		return nil, err
 	}
-
-	// Extract host for SNI
-	host, _, _ := net.SplitHostPort(addr)
 
 	utlsCfg := &utls.Config{
 		ServerName:         host,
@@ -164,7 +174,7 @@ func (c *Client) createHTTPClient() *http.Client {
 		baseTLS := &tls.Config{}
 		tr = &http2.Transport{
 			DialTLS: func(network, addr string, cfg *tls.Config) (net.Conn, error) {
-				return dialWithFingerprint(network, addr, baseTLS, c.Config.Fingerprint)
+				return dialWithFingerprint(network, addr, baseTLS, c.Config.Fingerprint, c.Config.CustomSNI)
 			},
 			StrictMaxConcurrentStreams: true,
 			ReadIdleTimeout:            0,
@@ -177,7 +187,7 @@ func (c *Client) createHTTPClient() *http.Client {
 		baseTLS := &tls.Config{InsecureSkipVerify: true} //nolint:gosec
 		tr = &http2.Transport{
 			DialTLS: func(network, addr string, cfg *tls.Config) (net.Conn, error) {
-				return dialWithFingerprint(network, addr, baseTLS, c.Config.Fingerprint)
+				return dialWithFingerprint(network, addr, baseTLS, c.Config.Fingerprint, c.Config.CustomSNI)
 			},
 			StrictMaxConcurrentStreams: true,
 			ReadIdleTimeout:            0,
@@ -235,7 +245,7 @@ func (c *Client) createHTTPClient() *http.Client {
 
 		tr = &http2.Transport{
 			DialTLS: func(network, addr string, _ *tls.Config) (net.Conn, error) {
-				return dialWithFingerprint(network, addr, tlsConfig, c.Config.Fingerprint)
+				return dialWithFingerprint(network, addr, tlsConfig, c.Config.Fingerprint, c.Config.CustomSNI)
 			},
 			StrictMaxConcurrentStreams: true,
 			ReadIdleTimeout:            0,

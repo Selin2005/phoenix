@@ -42,6 +42,7 @@ func NewServer(cfg *config.ServerConfig) (*Server, error) {
 			clientCfg := &config.ClientConfig{
 				RemoteAddr:      cfg.Outbound.Target,
 				TLSMode:         cfg.Outbound.TLSMode,
+				CustomSNI:       cfg.Outbound.CustomSNI,
 				Fingerprint:     cfg.Outbound.Fingerprint,
 				AuthToken:       cfg.Outbound.AuthToken,
 				ServerPublicKey: cfg.Outbound.ServerPublicKey,
@@ -318,6 +319,24 @@ func StartServer(cfg *config.ServerConfig) error {
 			ClientAuth:            clientAuth,
 			NextProtos:            []string{"h2"},
 			VerifyPeerCertificate: verifyPeer,
+			GetConfigForClient: func(hello *tls.ClientHelloInfo) (*tls.Config, error) {
+				if len(cfg.Security.AllowedSNI) > 0 {
+					allowed := false
+					for _, sni := range cfg.Security.AllowedSNI {
+						// hello.ServerName is the SNI received from the client
+						if hello.ServerName == sni {
+							allowed = true
+							break
+						}
+					}
+					if !allowed {
+						log.Printf("[TLS] Dropped connection with unauthorized SNI: %s", hello.ServerName)
+						return nil, fmt.Errorf("unrecognized SNI: %s", hello.ServerName)
+					}
+				}
+				// Return nil to continue with the default tlsConfig
+				return nil, nil
+			},
 		}
 
 		ln, err := tls.Listen("tcp", cfg.ListenAddr, tlsConfig)

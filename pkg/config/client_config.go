@@ -62,6 +62,10 @@ type ClientConfig struct {
 	// "" (empty) = use Phoenix Ed25519 pinning or h2c based on other fields
 	TLSMode string `toml:"tls_mode"`
 
+	// CustomSNI specifies an arbitrary SNI value to be sent during the TLS handshake.
+	// If set, it overrides the remote address's hostname.
+	CustomSNI string `toml:"custom_sni"`
+
 	// Fingerprint controls TLS ClientHello fingerprint spoofing.
 	// Mimics a browser to bypass DPI-based filtering on some ISPs.
 	// ""        → Go default TLS (no spoofing)

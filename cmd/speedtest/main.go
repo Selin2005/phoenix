@@ -25,7 +25,7 @@ func main() {
 	// Generate keys + token once (for TLS phases)
 	privServer, pubServer, _ := crypto.GenerateKeypair() // Ed25519 — for phases 3 and 4
 	privClient, pubClient, _ := crypto.GenerateKeypair() // Ed25519 — for mTLS (phase 4)
-	ecdsaServer, _ := crypto.GenerateECDSAKey()  // ECDSA P256 — for Chrome fingerprint phase
+	ecdsaServer, _ := crypto.GenerateECDSAKey()          // ECDSA P256 — for Chrome fingerprint phase
 	token, _ := crypto.GenerateToken()
 	os.WriteFile("spd_server.key", privServer, 0600)
 	os.WriteFile("spd_client.key", privClient, 0600)
@@ -119,7 +119,7 @@ func main() {
 	cfg6c := config.DefaultClientConfig()
 	cfg6c.RemoteAddr = cfg6s.ListenAddr
 	cfg6c.TLSMode = "insecure"
-	cfg6c.Fingerprint = "chrome"
+	cfg6c.Fingerprint = "chrome_dynamic"
 
 	results = append(results, runBenchmark("Insecure TLS + Chrome", cfg6s, cfg6c, nil, echoAddr, sinkAddr, sourceAddr))
 

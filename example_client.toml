@@ -22,6 +22,12 @@ remote_addr = "127.0.0.1:8080"
 #
 # tls_mode = "system"
 
+# ─── Custom SNI / SNI Spoofing ────────────────────────────
+# custom_sni: An arbitrary SNI value to be sent during the TLS handshake.
+# If set, this overrides the actual hostname of the Phoenix server.
+# This is a powerful technique to bypass DPI SNI filtering by masquerading as a whitelisted domain (e.g. google.com).
+# custom_sni = "google.com"
+
 # ─── TLS Fingerprint Spoofing ─────────────────────────────
 # fingerprint: Impersonates a browser's TLS ClientHello to bypass DPI filtering.
 # Only effective when TLS is active (tls_mode set, or private_key configured).

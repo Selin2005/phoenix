@@ -25,6 +25,10 @@ type ServerSecurity struct {
 
 	// AuthorizedClientKeys is a list of authorized client public keys (Base64).
 	AuthorizedClientKeys []string `toml:"authorized_clients"`
+
+	// AllowedSNI restricts which SNI hostnames the server will accept during the TLS handshake.
+	// If empty, any SNI is accepted (standard Go behavior).
+	AllowedSNI []string `toml:"allowed_sni"`
 }
 
 // DefaultServerSecurity returns the default security configuration (all disabled by default).
@@ -54,6 +58,7 @@ type Outbound struct {
 	Type            string `toml:"type"` // "direct" (default), "phoenix", "socks5"
 	Target          string `toml:"target"`
 	TLSMode         string `toml:"tls_mode"`
+	CustomSNI       string `toml:"custom_sni"`
 	Fingerprint     string `toml:"fingerprint"`
 	AuthToken       string `toml:"auth_token"`
 	ServerPublicKey string `toml:"server_public_key"`

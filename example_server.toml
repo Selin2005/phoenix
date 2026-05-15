@@ -38,6 +38,12 @@ listen_addr = ":8080"
 #   "CLIENT_PUBLIC_KEY_2..."
 # ]
 
+# allowed_sni: Restricts which SNI hostnames the server will accept during the TLS handshake.
+#   - If set    → Server will drop connections if the SNI doesn't match one in the list.
+#                 This protects against Active Probing by unauthorized scanners.
+#   - If empty  → Any SNI is accepted (default).
+# allowed_sni = ["google.com", "speedtest.net"]
+
 # ─── Security Modes Summary ──────────────────────────────
 #
 #  private_key | authorized_clients | auth_token | Mode
@@ -83,6 +89,9 @@ enable_ssh = false
 
 # tls_mode: Set to "secure" for standard TLS or "insecure" to skip cert verification.
 # tls_mode = "insecure"
+
+# custom_sni: Override the SNI hostname sent during the outbound TLS handshake.
+# custom_sni = "google.com"
 
 # fingerprint: Spoof client fingerprint to bypass DPI filtering.
 #   "chrome"         → Chrome Auto
