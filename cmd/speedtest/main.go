@@ -23,12 +23,15 @@ func main() {
 	time.Sleep(500 * time.Millisecond)
 
 	// Generate keys + token once (for TLS phases)
-	privServer, _, _ := crypto.GenerateKeypair() // Ed25519 — for phases 3
+	privServer, pubServer, _ := crypto.GenerateKeypair() // Ed25519 — for phases 3 and 4
+	privClient, pubClient, _ := crypto.GenerateKeypair() // Ed25519 — for mTLS (phase 4)
 	ecdsaServer, _ := crypto.GenerateECDSAKey()  // ECDSA P256 — for Chrome fingerprint phase
 	token, _ := crypto.GenerateToken()
 	os.WriteFile("spd_server.key", privServer, 0600)
+	os.WriteFile("spd_client.key", privClient, 0600)
 	os.WriteFile("spd_ecdsa_server.key", ecdsaServer, 0600)
 	defer os.Remove("spd_server.key")
+	defer os.Remove("spd_client.key")
 	defer os.Remove("spd_ecdsa_server.key")
 
 	results := []benchResult{}
@@ -59,67 +62,97 @@ func main() {
 
 	results = append(results, runBenchmark("h2c + Token", cfg2s, cfg2c, nil, echoAddr, sinkAddr, sourceAddr))
 
-	// ── Phase 3: Insecure TLS + Token ─────────────────────
-	printPhase("PHASE 3: Insecure TLS + Token Auth")
+	// ── Phase 3: One-Way TLS ──────────────────────────────
+	printPhase("PHASE 3: One-Way TLS (Ed25519 key pinning)")
 	cfg3s := config.DefaultServerConfig()
 	cfg3s.ListenAddr = findFreeAddr()
 	cfg3s.Security.EnableSOCKS5 = true
 	cfg3s.Security.EnableSSH = true
 	cfg3s.Security.PrivateKeyPath = "spd_server.key"
-	cfg3s.Security.AuthToken = token
 
 	cfg3c := config.DefaultClientConfig()
 	cfg3c.RemoteAddr = cfg3s.ListenAddr
-	cfg3c.TLSMode = "insecure"
-	cfg3c.AuthToken = token
+	cfg3c.ServerPublicKey = pubServer
 
-	results = append(results, runBenchmark("Insecure TLS + Token", cfg3s, cfg3c, nil, echoAddr, sinkAddr, sourceAddr))
+	results = append(results, runBenchmark("One-Way TLS", cfg3s, cfg3c, nil, echoAddr, sinkAddr, sourceAddr))
 
-	// ── Phase 4: Insecure TLS + Chrome Fingerprint ────────
-	printPhase("PHASE 4: Insecure TLS + Chrome Fingerprint")
+	// ── Phase 4: mTLS ─────────────────────────────────────
+	printPhase("PHASE 4: mTLS (Mutual Ed25519)")
 	cfg4s := config.DefaultServerConfig()
 	cfg4s.ListenAddr = findFreeAddr()
 	cfg4s.Security.EnableSOCKS5 = true
 	cfg4s.Security.EnableSSH = true
-	cfg4s.Security.PrivateKeyPath = "spd_ecdsa_server.key"
+	cfg4s.Security.PrivateKeyPath = "spd_server.key"
+	cfg4s.Security.AuthorizedClientKeys = []string{pubClient}
 
 	cfg4c := config.DefaultClientConfig()
 	cfg4c.RemoteAddr = cfg4s.ListenAddr
-	cfg4c.TLSMode = "insecure"
-	cfg4c.Fingerprint = "chrome"
+	cfg4c.PrivateKeyPath = "spd_client.key"
+	cfg4c.ServerPublicKey = pubServer
 
-	results = append(results, runBenchmark("Insecure TLS + Chrome", cfg4s, cfg4c, nil, echoAddr, sinkAddr, sourceAddr))
+	results = append(results, runBenchmark("mTLS", cfg4s, cfg4c, nil, echoAddr, sinkAddr, sourceAddr))
 
-	// ── Phase 5: Phoenix Outbound Relay ───────────────────
-	printPhase("PHASE 5: Phoenix Outbound Relay")
-	cfg5t := config.DefaultServerConfig()
-	cfg5t.ListenAddr = findFreeAddr()
-	cfg5t.Security.EnableSOCKS5 = true
-	cfg5t.Security.EnableSSH = true
-
+	// ── Phase 5: Insecure TLS + Token ─────────────────────
+	printPhase("PHASE 5: Insecure TLS + Token Auth")
 	cfg5s := config.DefaultServerConfig()
 	cfg5s.ListenAddr = findFreeAddr()
 	cfg5s.Security.EnableSOCKS5 = true
 	cfg5s.Security.EnableSSH = true
-	cfg5s.Outbound = &config.Outbound{
-		Type:   "phoenix",
-		Target: cfg5t.ListenAddr,
-	}
+	cfg5s.Security.PrivateKeyPath = "spd_server.key"
+	cfg5s.Security.AuthToken = token
 
 	cfg5c := config.DefaultClientConfig()
 	cfg5c.RemoteAddr = cfg5s.ListenAddr
+	cfg5c.TLSMode = "insecure"
+	cfg5c.AuthToken = token
 
-	results = append(results, runBenchmark("Phoenix Relay", cfg5s, cfg5c, cfg5t, echoAddr, sinkAddr, sourceAddr))
+	results = append(results, runBenchmark("Insecure TLS + Token", cfg5s, cfg5c, nil, echoAddr, sinkAddr, sourceAddr))
 
-	// ── Phase 6: SOCKS5 Outbound Relay ────────────────────
-	printPhase("PHASE 6: SOCKS5 Outbound Relay")
+	// ── Phase 6: Insecure TLS + Chrome Fingerprint ────────
+	printPhase("PHASE 6: Insecure TLS + Chrome Fingerprint")
 	cfg6s := config.DefaultServerConfig()
 	cfg6s.ListenAddr = findFreeAddr()
 	cfg6s.Security.EnableSOCKS5 = true
 	cfg6s.Security.EnableSSH = true
+	cfg6s.Security.PrivateKeyPath = "spd_ecdsa_server.key"
+
+	cfg6c := config.DefaultClientConfig()
+	cfg6c.RemoteAddr = cfg6s.ListenAddr
+	cfg6c.TLSMode = "insecure"
+	cfg6c.Fingerprint = "chrome"
+
+	results = append(results, runBenchmark("Insecure TLS + Chrome", cfg6s, cfg6c, nil, echoAddr, sinkAddr, sourceAddr))
+
+	// ── Phase 7: Phoenix Outbound Relay ───────────────────
+	printPhase("PHASE 7: Phoenix Outbound Relay")
+	cfg7t := config.DefaultServerConfig()
+	cfg7t.ListenAddr = findFreeAddr()
+	cfg7t.Security.EnableSOCKS5 = true
+	cfg7t.Security.EnableSSH = true
+
+	cfg7s := config.DefaultServerConfig()
+	cfg7s.ListenAddr = findFreeAddr()
+	cfg7s.Security.EnableSOCKS5 = true
+	cfg7s.Security.EnableSSH = true
+	cfg7s.Outbound = &config.Outbound{
+		Type:   "phoenix",
+		Target: cfg7t.ListenAddr,
+	}
+
+	cfg7c := config.DefaultClientConfig()
+	cfg7c.RemoteAddr = cfg7s.ListenAddr
+
+	results = append(results, runBenchmark("Phoenix Relay", cfg7s, cfg7c, cfg7t, echoAddr, sinkAddr, sourceAddr))
+
+	// ── Phase 8: SOCKS5 Outbound Relay ────────────────────
+	printPhase("PHASE 8: SOCKS5 Outbound Relay")
+	cfg8s := config.DefaultServerConfig()
+	cfg8s.ListenAddr = findFreeAddr()
+	cfg8s.Security.EnableSOCKS5 = true
+	cfg8s.Security.EnableSSH = true
 
 	socks5Addr := findFreeAddr()
-	cfg6s.Outbound = &config.Outbound{
+	cfg8s.Outbound = &config.Outbound{
 		Type:   "socks5",
 		Target: socks5Addr,
 	}
@@ -129,10 +162,10 @@ func main() {
 	go s5.ListenAndServe(nil)
 	defer s5.Shutdown()
 
-	cfg6c := config.DefaultClientConfig()
-	cfg6c.RemoteAddr = cfg6s.ListenAddr
+	cfg8c := config.DefaultClientConfig()
+	cfg8c.RemoteAddr = cfg8s.ListenAddr
 
-	results = append(results, runBenchmark("SOCKS5 Relay", cfg6s, cfg6c, nil, echoAddr, sinkAddr, sourceAddr))
+	results = append(results, runBenchmark("SOCKS5 Relay", cfg8s, cfg8c, nil, echoAddr, sinkAddr, sourceAddr))
 
 	// ── Summary ───────────────────────────────────────────
 	fmt.Println("\n╔════════════════════════════════════════════════════════╗")
