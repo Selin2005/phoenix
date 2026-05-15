@@ -103,3 +103,12 @@ enable_ssh = false
 
 # socks5_pass: Password for authenticating with the upstream SOCKS5 proxy.
 # socks5_pass = "123456"
+
+# ── Recovery settings for "phoenix" type outbound ──
+# [outbound.recovery]
+# enabled = true
+# error_threshold = 10
+# error_window_s = 30
+# backoff_base_ms = 500
+# backoff_cap_ms = 15000
+# backoff_jitter = true

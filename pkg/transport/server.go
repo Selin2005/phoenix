@@ -46,6 +46,7 @@ func NewServer(cfg *config.ServerConfig) (*Server, error) {
 				AuthToken:       cfg.Outbound.AuthToken,
 				ServerPublicKey: cfg.Outbound.ServerPublicKey,
 				PrivateKeyPath:  cfg.Outbound.PrivateKeyPath,
+				Recovery:        cfg.Outbound.Recovery,
 			}
 			s.outboundPhoenixClient = NewClient(clientCfg)
 		} else if cfg.Outbound.Type == "socks5" {

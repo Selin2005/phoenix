@@ -86,3 +86,29 @@ enable_udp = true
 # protocol = "shadowsocks"
 # local_addr = "127.0.0.1:8388"
 # auth = "aes-256-gcm:my-secret-password"
+
+# ═══════════════════════════════════════════════════════════
+#  Zombie Connection Recovery
+# ═══════════════════════════════════════════════════════════
+# Controls how the client detects dead connections and automatically
+# reconnects using AWS Full Jitter exponential backoff.
+[recovery]
+# enabled: Toggle automatic connection recovery.
+enabled = true
+
+# error_threshold: Number of errors required to trigger a reconnect.
+# Increase for highly unstable networks to prevent excessive resets.
+error_threshold = 10
+
+# error_window_s: The rolling time window (in seconds) for counting errors.
+error_window_s = 30
+
+# backoff_base_ms: The starting backoff delay (in milliseconds).
+backoff_base_ms = 500
+
+# backoff_cap_ms: The maximum backoff delay (in milliseconds).
+backoff_cap_ms = 15000
+
+# backoff_jitter: If true, adds random jitter to the delay to mimic
+# real browsers and avoid detection by DPI systems.
+backoff_jitter = true

@@ -57,9 +57,10 @@ type Outbound struct {
 	Fingerprint     string `toml:"fingerprint"`
 	AuthToken       string `toml:"auth_token"`
 	ServerPublicKey string `toml:"server_public_key"`
-	PrivateKeyPath  string `toml:"private_key"`
-	SOCKS5User      string `toml:"socks5_user"`
-	SOCKS5Pass      string `toml:"socks5_pass"`
+	PrivateKeyPath  string         `toml:"private_key"`
+	SOCKS5User      string         `toml:"socks5_user"`
+	SOCKS5Pass      string         `toml:"socks5_pass"`
+	Recovery        ClientRecovery `toml:"recovery"`
 }
 
 // DefaultServerConfig returns a server configuration with safe defaults.
