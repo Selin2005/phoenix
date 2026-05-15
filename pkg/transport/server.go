@@ -17,6 +17,7 @@ import (
 	"phoenix/pkg/config"
 	"phoenix/pkg/crypto"
 	"phoenix/pkg/protocol"
+	"phoenix/pkg/utils"
 	"time"
 
 	"golang.org/x/net/http2"
@@ -131,16 +132,13 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		defer outboundStream.Close()
 
-		errChan := make(chan error, 2)
-		go func() {
-			_, err := io.Copy(outboundStream, stream)
-			errChan <- err
-		}()
-		go func() {
-			_, err := io.Copy(stream, outboundStream)
-			errChan <- err
-		}()
-		<-errChan
+		err = utils.Relay(stream, outboundStream)
+		if err != nil && err != io.EOF {
+			errStr := err.Error()
+			if !containsExpectedTeardownError(errStr) {
+				log.Printf("Phoenix Relay error: %v", err)
+			}
+		}
 		return
 	}
 

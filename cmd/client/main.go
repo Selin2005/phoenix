@@ -15,6 +15,7 @@ import (
 	"phoenix/pkg/crypto"
 	"phoenix/pkg/protocol"
 	"phoenix/pkg/transport"
+	"phoenix/pkg/utils"
 	"strings"
 	"sync"
 	"syscall"
@@ -228,15 +229,11 @@ func handleConnection(client *transport.Client, in config.ClientInbound, conn ne
 		// Here we already dialed the Server stream.
 		// We just need to copy conn <-> stream.
 
+		// Bridge connections using high-throughput relay
 		go func() {
 			defer conn.Close()
 			defer stream.Close()
-			io.Copy(conn, stream)
-		}()
-		go func() {
-			defer conn.Close()
-			defer stream.Close()
-			io.Copy(stream, conn)
+			utils.Relay(conn, stream)
 		}()
 
 	case protocol.ProtocolShadowsocks:

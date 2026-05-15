@@ -5,6 +5,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"phoenix/pkg/utils"
 )
 
 // Dialer abstracts the connection creation for SSH tunnels.
@@ -54,8 +55,6 @@ func HandleConnection(rw io.ReadWriteCloser, target string, dialer Dialer) error
 	}
 	defer destConn.Close()
 
-	// Bidirectional copy
-	go io.Copy(destConn, rw)
-	_, err = io.Copy(rw, destConn)
-	return err
+	// Bidirectional copy using high-throughput 128KB relay buffer
+	return utils.Relay(rw, destConn)
 }

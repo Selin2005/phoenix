@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"phoenix/pkg/utils"
 )
 
 // Dialer abstracts the connection creation.
@@ -124,16 +125,6 @@ func HandleConnection(conn io.ReadWriteCloser, dialer Dialer, enableUDP bool) er
 	// Success reply
 	conn.Write([]byte{0x05, 0x00, 0x00, 0x01, 0, 0, 0, 0, 0, 0})
 
-	// 4. Proxy
-	errChan := make(chan error, 2)
-	go func() {
-		_, err := io.Copy(destConn, conn)
-		errChan <- err
-	}()
-	go func() {
-		_, err := io.Copy(conn, destConn)
-		errChan <- err
-	}()
-
-	return <-errChan
+	// 4. Proxy using high-throughput relay
+	return utils.Relay(conn, destConn)
 }

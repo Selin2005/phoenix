@@ -2,9 +2,9 @@ package shadowsocks
 
 import (
 	"fmt"
-	"io"
 	"log"
 	"net"
+	"phoenix/pkg/utils"
 	"strings"
 
 	"github.com/shadowsocks/go-shadowsocks2/core"
@@ -73,18 +73,8 @@ func handleConn(conn net.Conn, dialer Dialer) {
 	}
 	defer stream.Close()
 
-	// 3. Bidirectional relay
-	errChan := make(chan error, 2)
-	go func() {
-		_, err := io.Copy(stream, conn)
-		errChan <- err
-	}()
-	go func() {
-		_, err := io.Copy(conn, stream)
-		errChan <- err
-	}()
-
-	<-errChan
+	// 3. Bidirectional relay using high-throughput buffers
+	utils.Relay(conn, stream)
 }
 
 // parseAuth splits "method:password" into its components.
